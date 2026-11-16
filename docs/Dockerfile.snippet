@@ -1,0 +1,102 @@
+# syntax=docker/dockerfile:1
+# Piper in the image of an Arandu application.
+#
+# What this snippet does, and why it looks like this:
+#
+# * Piper is the "piper-tts" Python package (OHF-Voice/piper1-gpl): its wheel
+#   carries the compiled phonemizer (espeak-ng) and asks pip for onnxruntime
+#   and numpy. The `piper` program that pip writes is a script, so the runtime
+#   needs a Python interpreter. gcr.io/distroless/python3-debian12 is that:
+#   Debian 12 glibc, libstdc++ and Python 3.11, no shell, no package manager,
+#   non-root. A distroless/static image cannot run Piper (no glibc, no
+#   libstdc++, no Python), and distroless/cc has the libraries but not Python.
+# * Everything is fetched and verified in a build stage: the wheel and the
+#   voices are checked against a sha256 written here, so a changed file fails
+#   the build instead of reaching production. Update the digests when you
+#   upgrade the version or a voice.
+# * The Python dependencies are pinned to the versions this was tested with
+#   (constraints.txt, written in the build stage).
+# * Nothing is installed in the runtime image by pip or apt: the packages are
+#   copied from the build stage, and the application reaches them with
+#   PIPER_BIN=/opt/piper/bin/piper and PYTHONPATH=/opt/piper (see the README
+#   for the matching piper.Config).
+# * The application's own stage and ffmpeg are yours: replace them. ffmpeg is
+#   only needed for piper.FormatOpus and has to be built with libopus (the
+#   static builds usually are); the image that already carries ffmpeg for
+#   arandu-whisper has it.
+#
+# The sha256 of the wheel is chosen by TARGETARCH (amd64 and arm64). It was
+# built and run on arm64; the amd64 digest is the one PyPI publishes.
+
+FROM golang:1.26 AS app
+WORKDIR /src
+COPY . .
+RUN CGO_ENABLED=0 go build -trimpath -o /out/app .
+
+FROM debian:bookworm-slim AS piper
+ARG TARGETARCH
+# piper-tts 1.8.0, https://github.com/OHF-Voice/piper1-gpl/releases/tag/v1.8.0
+ARG PIPER_TTS_VERSION=1.8.0
+ARG PIPER_TTS_SHA256_AMD64=25b4d3f31ff70c8fa7151908e00aaa5650cbdf16bca8fcf21299f3941b89a7d3
+ARG PIPER_TTS_SHA256_ARM64=3f60c1917de6d8e8033f395878ad3f88f6dfee88a8b05f98971a275f76a38484
+# The voices, from a fixed revision of https://huggingface.co/rhasspy/piper-voices.
+# Both are installed, and the application picks one with PIPER_VOICE (or per
+# call with SpeakAs). pt_BR-faber-medium: CC0 recordings, fine-tuned from
+# Hi-Fi TTS reader 92 (CC BY 4.0, which asks for attribution).
+# pt_BR-cadu-medium: CC0 recordings, fine-tuned from the CC0 nl_BE-rdh; no
+# attribution requirement.
+ARG VOICE_REV=e9ab671f2a0e50a701b34361136ba3e6a3a9eb0c
+ARG FABER_ONNX_SHA256=75e913eb463db0b6ac7ddf68d3e4c9ac19ace36dc3b710a81039b448352b8ffc
+ARG FABER_JSON_SHA256=fa8a8fecb01ae198bc416381e368d3206f85bad1449a0f11e1f6a9edf85a32f1
+ARG CADU_ONNX_SHA256=d5a662e3f606d5a49dd29ba9ce90c304ae45dd9543f8b0c773bcb0de282499de
+ARG CADU_JSON_SHA256=9fa837b7c1237ea5978bcd7be38c130798e8faa064f754873bb4ce5fc498bd88
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates curl python3 python3-pip \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /tmp/fetch
+RUN set -eu; \
+    case "$TARGETARCH" in \
+      amd64) arch=x86_64;  sha="$PIPER_TTS_SHA256_AMD64" ;; \
+      arm64) arch=aarch64; sha="$PIPER_TTS_SHA256_ARM64" ;; \
+      *) echo "unsupported architecture $TARGETARCH" >&2; exit 1 ;; \
+    esac; \
+    wheel="piper_tts-${PIPER_TTS_VERSION}-cp39-abi3-manylinux_2_17_${arch}.manylinux2014_${arch}.manylinux_2_28_${arch}.whl"; \
+    curl -fsSL -o "$wheel" "https://github.com/OHF-Voice/piper1-gpl/releases/download/v${PIPER_TTS_VERSION}/${wheel}"; \
+    echo "${sha}  ${wheel}" | sha256sum -c -; \
+    printf '%s\n' numpy==2.4.6 onnxruntime==1.32.0 protobuf==7.36.2 flatbuffers==25.12.19 packaging==26.3 pathvalidate==3.3.1 > /tmp/constraints.txt; \
+    pip install --no-cache-dir --break-system-packages --target /opt/piper -c /tmp/constraints.txt "./${wheel}"
+
+RUN set -eu; \
+    mkdir -p /opt/voices; \
+    fetch() { \
+      voice="$1"; path="$2"; onnx_sha="$3"; json_sha="$4"; \
+      base="https://huggingface.co/rhasspy/piper-voices/resolve/${VOICE_REV}/${path}"; \
+      curl -fsSL -o "/opt/voices/${voice}.onnx"       "${base}/${voice}.onnx"; \
+      curl -fsSL -o "/opt/voices/${voice}.onnx.json"  "${base}/${voice}.onnx.json"; \
+      curl -fsSL -o "/opt/voices/${voice}.MODEL_CARD" "${base}/MODEL_CARD"; \
+      echo "${onnx_sha}  /opt/voices/${voice}.onnx"      >> /tmp/voices.sha256; \
+      echo "${json_sha}  /opt/voices/${voice}.onnx.json" >> /tmp/voices.sha256; \
+    }; \
+    fetch pt_BR-faber-medium pt/pt_BR/faber/medium "$FABER_ONNX_SHA256" "$FABER_JSON_SHA256"; \
+    fetch pt_BR-cadu-medium  pt/pt_BR/cadu/medium  "$CADU_ONNX_SHA256"  "$CADU_JSON_SHA256"; \
+    sha256sum -c /tmp/voices.sha256
+
+# The licenses go with the files: GPL-3.0 for Piper, the MODEL_CARD for each voice.
+RUN set -eu; \
+    mkdir -p /opt/licenses; \
+    cp /opt/piper/piper_tts-*.dist-info/licenses/* /opt/licenses/ 2>/dev/null || true
+
+FROM gcr.io/distroless/python3-debian12:nonroot
+COPY --from=piper /opt/piper    /opt/piper
+COPY --from=piper /opt/voices   /opt/voices
+COPY --from=piper /opt/licenses /usr/share/licenses/piper
+COPY --from=app   /out/app      /app
+# COPY --from=ffmpeg /ffmpeg /usr/local/bin/ffmpeg   # only for piper.FormatOpus
+ENV PIPER_BIN=/opt/piper/bin/piper \
+    PIPER_VOICES_DIR=/opt/voices \
+    PIPER_VOICE=cadu \
+    PIPER_PYTHONPATH=/opt/piper
+# distroless/python3 starts the interpreter; this image starts the application.
+ENTRYPOINT ["/app"]
