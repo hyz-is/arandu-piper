@@ -193,7 +193,7 @@ func (c *Client) prepare(voice Voice, text string) (voiceModel, string, error) {
 // Key names the audio SpeakAs would make of text with voice (the default
 // voice when empty), without making it: two calls whose audio would be the
 // same have the same key, and any change that would change the audio changes
-// the key -- the voice and its files, the speaker, the pace, the pauses, the
+// the key -- the voice and its files, the speaker, the pace, the noise, the pauses, the
 // format and its bit rate, and the text once its spacing and line breaks are
 // cleaned as SpeakAs cleans them. Case and punctuation are kept, as they
 // change how the voice reads. The key is 64 lowercase hexadecimal characters,
@@ -210,6 +210,12 @@ func (c *Client) Key(voice Voice, text string) (string, error) {
 	h := sha256.New()
 	fmt.Fprintf(h, "arandu-piper/1\x00%s\x00%s\x00%d\x00%v\x00%d\x00%s\x00%d\x00",
 		voice, v.identity, v.speaker, c.lengthScale, c.silence, c.format, c.opusBitrate)
+	// The noise is hashed only when set, so a client that leaves it at the
+	// voice's own value keeps the keys, and the audio stored under them, that
+	// v0.1.0 made.
+	if c.noiseScale != 0 || c.noiseW != 0 {
+		fmt.Fprintf(h, "noise\x00%v\x00%v\x00", c.noiseScale, c.noiseW)
+	}
 	io.WriteString(h, spoken)
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
@@ -229,6 +235,12 @@ func (c *Client) synthesize(ctx context.Context, dir string, v voiceModel, spoke
 	}
 	if c.lengthScale != 0 {
 		args = append(args, "--length_scale", strconv.FormatFloat(c.lengthScale, 'f', -1, 64))
+	}
+	if c.noiseScale != 0 {
+		args = append(args, "--noise_scale", strconv.FormatFloat(c.noiseScale, 'f', -1, 64))
+	}
+	if c.noiseW != 0 {
+		args = append(args, "--noise_w", strconv.FormatFloat(c.noiseW, 'f', -1, 64))
 	}
 	if c.silence > 0 {
 		args = append(args, "--sentence_silence", strconv.FormatFloat(c.silence.Seconds(), 'f', -1, 64))

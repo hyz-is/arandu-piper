@@ -231,6 +231,8 @@ func TestSpeakPassesTheOptionalSettings(t *testing.T) {
 	script(t, r.dir, "piper", fmt.Sprintf("echo \"piper $*\" >> %s/calls.log\ncat >/dev/null\nwhile [ $# -gt 0 ]; do [ \"$1\" = \"-f\" ] && out=$2; shift; done\n%s\n", r.dir, r.okPiper()))
 	r.voice.SpeakerID = 1
 	r.cfg.LengthScale = 1.25
+	r.cfg.NoiseScale = 0.75
+	r.cfg.NoiseW = 0.9
 	r.cfg.SentenceSilence = 350 * time.Millisecond
 	if err := os.WriteFile(r.voice.ModelPath+".json", []byte(`{"num_speakers": 2}`), 0o600); err != nil {
 		t.Fatal(err)
@@ -239,9 +241,23 @@ func TestSpeakPassesTheOptionalSettings(t *testing.T) {
 		t.Fatal(err)
 	}
 	cli := r.call(t, "piper")
-	for _, arg := range []string{" -s 1", "--length_scale 1.25", "--sentence_silence 0.35"} {
+	for _, arg := range []string{" -s 1", "--length_scale 1.25", "--noise_scale 0.75", "--noise_w 0.9", "--sentence_silence 0.35"} {
 		if !strings.Contains(cli, arg) {
 			t.Errorf("piper call lacks %q: %q", arg, cli)
+		}
+	}
+}
+
+func TestSpeakLeavesTheNoiseToTheVoiceWhenItIsZero(t *testing.T) {
+	r := newRig(t, "")
+	script(t, r.dir, "piper", fmt.Sprintf("echo \"piper $*\" >> %s/calls.log\ncat >/dev/null\nwhile [ $# -gt 0 ]; do [ \"$1\" = \"-f\" ] && out=$2; shift; done\n%s\n", r.dir, r.okPiper()))
+	if _, err := r.client(t).Speak(context.Background(), pronto); err != nil {
+		t.Fatal(err)
+	}
+	cli := r.call(t, "piper")
+	for _, arg := range []string{"--noise_scale", "--noise_w"} {
+		if strings.Contains(cli, arg) {
+			t.Errorf("piper call has %q although the noise was left at zero: %q", arg, cli)
 		}
 	}
 }
@@ -621,6 +637,10 @@ func TestNewValidatesTheConfig(t *testing.T) {
 		{"speaker the voice lacks", func(t *testing.T, r *rig, _ string) { r.voice.SpeakerID = 1 }, "1 speaker(s)"},
 		{"length scale too small", func(t *testing.T, r *rig, _ string) { r.cfg.LengthScale = 0.1 }, "LengthScale"},
 		{"length scale too large", func(t *testing.T, r *rig, _ string) { r.cfg.LengthScale = 9 }, "LengthScale"},
+		{"negative noise scale", func(t *testing.T, r *rig, _ string) { r.cfg.NoiseScale = -0.1 }, "NoiseScale"},
+		{"noise scale too large", func(t *testing.T, r *rig, _ string) { r.cfg.NoiseScale = 2.5 }, "NoiseScale"},
+		{"negative noise w", func(t *testing.T, r *rig, _ string) { r.cfg.NoiseW = -1 }, "NoiseW"},
+		{"noise w too large", func(t *testing.T, r *rig, _ string) { r.cfg.NoiseW = 3 }, "NoiseW"},
 		{"negative sentence silence", func(t *testing.T, r *rig, _ string) { r.cfg.SentenceSilence = -time.Second }, "SentenceSilence"},
 		{"huge sentence silence", func(t *testing.T, r *rig, _ string) { r.cfg.SentenceSilence = time.Minute }, "SentenceSilence"},
 		{"unknown format", func(t *testing.T, r *rig, _ string) { r.cfg.Format = "mp3" }, `Format "mp3"`},

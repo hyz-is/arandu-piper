@@ -65,6 +65,16 @@ type Config struct {
 	// the voice's own. Zero leaves the voice's own pace, which is 1. The
 	// accepted range is 0.25 to 4.
 	LengthScale float64
+	// NoiseScale is the generator noise (Piper's --noise_scale): how much the
+	// voice varies from one phrase to the next. Lower is flatter and more
+	// regular, higher is livelier and less stable. Zero leaves the voice's own
+	// value (0.667 in the catalogue voices). The accepted range is above 0 to 2.
+	NoiseScale float64
+	// NoiseW is the phoneme width noise (Piper's --noise_w): how much the
+	// length of each sound varies, which is most of what makes the rhythm
+	// sound spoken and not metronomic. Zero leaves the voice's own value (0.8
+	// in the catalogue voices). The accepted range is above 0 to 2.
+	NoiseW float64
 	// SentenceSilence is the pause after each sentence. Zero leaves Piper's own
 	// default, 0.2 seconds.
 	SentenceSilence time.Duration
@@ -106,6 +116,8 @@ type Client struct {
 	voices      map[Voice]voiceModel
 	voice       Voice
 	lengthScale float64
+	noiseScale  float64
+	noiseW      float64
 	silence     time.Duration
 	format      Format
 	ffmpeg      string
@@ -122,7 +134,7 @@ var _ Speaker = (*Client)(nil)
 // is missing or is not a regular file, a program that is not executable, no
 // voice at all, a default voice that is not configured, a voice configuration
 // that is not JSON, a speaker the voice does not have, an
-// unknown format, a number out of its range, and a TempDir that is not a
+// unknown format, a number out of its range (pace, noise, pauses, bit rate), and a TempDir that is not a
 // directory. Nothing is started here: the programs are only looked at, not
 // run.
 func New(cfg Config) (*Client, error) {
@@ -158,6 +170,14 @@ func New(cfg Config) (*Client, error) {
 
 	if cfg.LengthScale != 0 && (math.IsNaN(cfg.LengthScale) || cfg.LengthScale < 0.25 || cfg.LengthScale > 4) {
 		return nil, fmt.Errorf("piper: LengthScale %v is outside 0.25 to 4 (zero keeps the voice's own pace)", cfg.LengthScale)
+	}
+	for _, n := range []struct {
+		name  string
+		value float64
+	}{{"NoiseScale", cfg.NoiseScale}, {"NoiseW", cfg.NoiseW}} {
+		if n.value != 0 && (math.IsNaN(n.value) || n.value < 0 || n.value > 2) {
+			return nil, fmt.Errorf("piper: %s %v is outside 0 to 2 (zero keeps the voice's own value)", n.name, n.value)
+		}
 	}
 	if cfg.SentenceSilence < 0 || cfg.SentenceSilence > 10*time.Second {
 		return nil, errors.New("piper: SentenceSilence must be between zero and 10 seconds")
@@ -220,6 +240,8 @@ func New(cfg Config) (*Client, error) {
 		voices:      voices,
 		voice:       voice,
 		lengthScale: cfg.LengthScale,
+		noiseScale:  cfg.NoiseScale,
+		noiseW:      cfg.NoiseW,
 		silence:     cfg.SentenceSilence,
 		format:      format,
 		ffmpeg:      ffmpeg,

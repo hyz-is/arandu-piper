@@ -65,7 +65,8 @@ not list it.
   conversion together; an elapsed deadline is `ErrTimeout`, a cancelled caller
   is `context.Canceled`.
 - **The facts about Piper's command line live in `synthesize`**: `-m`, `-c`,
-  `-f`, and optionally `-s`, `--length_scale` and `--sentence_silence`, with the
+  `-f`, and optionally `-s`, `--length_scale`, `--noise_scale`, `--noise_w` and
+  `--sentence_silence`, with the
   text on standard input. They are accepted by the `piper` of the `piper-tts`
   package (OHF-Voice/piper1-gpl, GPL-3.0) and by the standalone binary of
   rhasspy/piper (MIT, archived); do not add `-q`, which only the second knows.

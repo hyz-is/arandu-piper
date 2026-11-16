@@ -148,6 +148,18 @@ func TestTheKeyChangesWithWhatChangesTheAudioAndOnlyWithThat(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	noisy := r.config()
+	noisy.NoiseScale = 0.75
+	cn, err := piper.New(noisy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wide := r.config()
+	wide.NoiseW = 0.9
+	cw, err := piper.New(wide)
+	if err != nil {
+		t.Fatal(err)
+	}
 	opus := r.config()
 	opus.Format, opus.FFmpegPath = piper.FormatOpus, filepath.Join(r.dir, "ffmpeg")
 	co, err := piper.New(opus)
@@ -161,13 +173,15 @@ func TestTheKeyChangesWithWhatChangesTheAudioAndOnlyWithThat(t *testing.T) {
 		t.Fatal(err)
 	}
 	different := map[string]string{
-		"another voice":     key(c, piper.VoiceFaber, "Anotado. Está certo?"),
-		"another word":      key(c, piper.VoiceCadu, "Anotado. Está errado?"),
-		"other punctuation": key(c, piper.VoiceCadu, "Anotado, está certo?"),
-		"other case":        key(c, piper.VoiceCadu, "ANOTADO. Está certo?"),
-		"another pace":      key(cs, piper.VoiceCadu, "Anotado. Está certo?"),
-		"another format":    key(co, piper.VoiceCadu, "Anotado. Está certo?"),
-		"another pause":     key(cp, piper.VoiceCadu, "Anotado. Está certo?"),
+		"another voice":       key(c, piper.VoiceFaber, "Anotado. Está certo?"),
+		"another word":        key(c, piper.VoiceCadu, "Anotado. Está errado?"),
+		"other punctuation":   key(c, piper.VoiceCadu, "Anotado, está certo?"),
+		"other case":          key(c, piper.VoiceCadu, "ANOTADO. Está certo?"),
+		"another pace":        key(cs, piper.VoiceCadu, "Anotado. Está certo?"),
+		"another noise scale": key(cn, piper.VoiceCadu, "Anotado. Está certo?"),
+		"another noise w":     key(cw, piper.VoiceCadu, "Anotado. Está certo?"),
+		"another format":      key(co, piper.VoiceCadu, "Anotado. Está certo?"),
+		"another pause":       key(cp, piper.VoiceCadu, "Anotado. Está certo?"),
 	}
 	seen := map[string]string{base: "base"}
 	for name, k := range different {

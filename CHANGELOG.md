@@ -10,6 +10,13 @@ a release is corrected by another release and never by moving a tag.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-16
+
+### Added
+
+- `Config.NoiseScale` and `Config.NoiseW`, passed to Piper as `--noise_scale` and `--noise_w` (both accepted by the `piper-tts` program and by the standalone binary). They set how much the voice varies from phrase to phrase and how much the length of each sound varies, which is what separates a lively voice from a mechanical one. Zero leaves the voice's own values; `New` refuses a negative, NaN or above-2 value.
+- Both enter `Client.Key` when set. A client that leaves them at zero keeps the keys of 0.1.0, so audio already stored stays valid.
+
 ## [0.1.0] - 2026-11-15
 
 ### Added

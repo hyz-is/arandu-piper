@@ -64,7 +64,7 @@ Piper has two lines, and the choice matters because of the voices.
 | arm64 macOS | wheel for macOS 11 and later | the "aarch64" macOS release is an x86_64 build without its libraries and does not start |
 
 The module's command line (`-m`, `-c`, `-f`, `-s`, `--length_scale`,
-`--sentence_silence`, text on standard input) is the part both accept, so
+`--noise_scale`, `--noise_w`, `--sentence_silence`, text on standard input) is the part both accept, so
 `BinaryPath` can be either. The license note below says why you will want the
 first.
 
@@ -308,6 +308,8 @@ The rest of `Config` applies to every voice:
 | field | default | |
 | --- | --- | --- |
 | `LengthScale` | the voice's own | 0.25 to 4; above 1 is slower |
+| `NoiseScale` | the voice's own (0.667) | above 0 to 2; the variation of the voice from phrase to phrase: lower is flatter, higher is livelier and less stable |
+| `NoiseW` | the voice's own (0.8) | above 0 to 2; the variation in the length of each sound: higher breaks the metronome rhythm, too high stumbles |
 | `SentenceSilence` | Piper's own, 0.2 s | the pause after each sentence |
 | `Format` | `FormatWAV` | or `FormatOpus` |
 | `FFmpegPath` | `ffmpeg` in PATH | only when `Format` is `FormatOpus` |
