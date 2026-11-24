@@ -31,9 +31,12 @@ not list it.
 | `config.go` | `Config`, `Format`, the defaults, `New` and the validation of every path |
 | `voice.go` | `Voice`, `VoiceFaber`, `VoiceCadu`, `ParseVoice`, `VoicesIn`, `VoiceFiles` and the check of each voice's files |
 | `cache.go` | `Keyed`, `Cache`, `Store`, `Recording`, `Result`, `MemoryStore`: an audio made once and reused for the same key |
+| `handler.go` | `Handler`: `POST` text and voice, the audio back, bearer tokens per client, body and concurrency limits, the wire error codes |
+| `remote.go` | `Remote`, `ParseNodes`, `Health`: a `Speaker` and `Keyed` over several nodes with failover and a cooldown |
 | `plain.go` | `Plain`, which strips WhatsApp and Markdown formatting and emojis before the text is spoken |
 | `fake.go` | `Fake`, the scripted `Speaker` for an application's tests |
 | `docs/Dockerfile.snippet` | the build and runtime stages that put Piper and a voice in an application's image; it was built and run, keep it that way when a digest or version changes |
+| `tests/Unit/service_test.go` | the handler, the remote (rotation, failover, cooldown, key, health) and the two together |
 | `tests/Unit/piper_test.go` | the client against stand-in `piper` and `ffmpeg` scripts, against the real ffmpeg when present, against the real Piper when `PIPER_BIN` and `PIPER_MODEL` are set, and the fake |
 | `tests/Unit/voice_test.go` | several voices in one client, `ParseVoice`, `VoicesIn` and what changes the key |
 | `tests/Unit/cache_test.go` | the reuse, a failing store, identical calls at the same time |
