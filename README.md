@@ -287,6 +287,61 @@ fake.Calls()[0].Voice  // and the voice; empty is the default one
 `*Fake` also has `Key`, so `piper.NewCache(fake, piper.NewMemoryStore())` tests
 the reuse without Piper.
 
+## As a service
+
+Speech can be made on a server of its own and requested over HTTP by the
+applications that need it.
+
+**A handler.** `NewHandler` serves any `Speaker`:
+
+```go
+h, err := piper.NewHandler(piper.HandlerConfig{
+    Speaker:       client,              // a *piper.Client with Format: piper.FormatOpus
+    Tokens:        map[string]string{"corujao": os.Getenv("VOICE_TOKEN_CORUJAO")}, // a client per token
+    MaxConcurrent: 2,                   // the rest wait QueueWait, then get 429
+    Logger:        slog.Default(),      // client, status, characters, time: never the text or the audio
+})
+mux.Handle("/speak", h)
+```
+
+`POST /speak` with `Authorization: Bearer <token>` and `{"text": "...", "voice": "pt_BR-cadu-medium"}`
+(the voice is optional). The audio is the body, with its MIME type as
+`Content-Type` and its length in `X-Audio-Duration-Ms`. Errors are
+`{"error": code, "message": text}` with `400 empty_text`, `unknown_voice` or
+`bad_request`, `401 unauthorized`, `413 text_too_long` or `too_large`, `429 busy`
+(with `Retry-After`), `502 failed`, `bad_output` or `convert_failed` and
+`504 timeout`. Tokens have at least 32 characters, are compared in constant time
+and never logged. Nothing is kept: the client's private directory is removed
+before the call returns.
+
+**A remote client.** `NewRemote` is a `Speaker` (and `Keyed`, so `NewCache` works
+over it) that calls one or more nodes running the handler, so the application
+chooses local or remote by configuration:
+
+```go
+var speaker piper.Keyed
+if nodes := cfg.Voice.Nodes; nodes != "" {            // VOICE_API_NODES=one=https://voz1.example,two=https://voz2.example
+    list, err := piper.ParseNodes(nodes)
+    if err != nil { return App{}, err }
+    speaker, err = piper.NewRemote(piper.RemoteConfig{Nodes: list, Token: cfg.Voice.Token, KeyTag: "v1"})
+    if err != nil { return App{}, err }
+} else {
+    speaker, err = piper.New(localConfig)
+    if err != nil { return App{}, err }
+}
+cache := piper.NewCache(speaker, store)
+```
+
+Calls go to the nodes in turn. A node that is busy (429), unreachable, timed out
+or failing is skipped at once and the next one is tried; after
+`FailureThreshold` failures in a row (3) it leaves the rotation for `Cooldown`
+(30 s), and when every node is out they are all tried as a last resort. A refusal
+another node would repeat (empty or too long text, an unknown voice, a wrong
+token) is returned as it is, as the same `errors.Is` sentinel the local client
+returns. `Remote.Key` has no network: it hashes the voice, the cleaned text and
+`KeyTag`, which you change when the nodes' voices or settings change.
+`Remote.Health(ctx)` asks every node's `/_arandu/health`.
+
 ## Config
 
 | field | default | |

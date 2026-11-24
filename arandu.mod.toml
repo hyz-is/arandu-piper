@@ -8,9 +8,11 @@ framework = ">= 0.50"
 profiles = ["conventional", "performance"]
 
 [permissions]
-# Speech is made on the application's own server. Nothing leaves the process by
-# the network: no text, no audio, no telemetry.
-network = false
+# Speech is made on the application's own server by default and then nothing
+# leaves the process by the network. The network is used only when the
+# application asks for it: Handler serves the text sent to it, and Remote posts
+# text to the nodes it was given. No telemetry, and no address but those.
+network = true
 # Each call writes the audio Piper makes (and the Opus file, when asked) to a
 # private temporary directory (Config.TempDir), reads it back, and removes the
 # directory before returning. Piper also reads the configured voice files.

@@ -12,7 +12,7 @@ import (
 
 // TestTheManifestMatchesWhatThePackageDoes holds arandu.mod.toml against the
 // code. This package starts programs (exec) and writes a private temporary
-// directory (filesystem), and makes no network call, owns no table and does not
+// directory (filesystem), and uses the network only when a Handler or a Remote is built, owns no table and does not
 // import the framework. `aru doctor` audits an application's own tree and never
 // loads an installed package, so this suite is the only place the declaration is
 // checked.
@@ -24,7 +24,7 @@ func TestTheManifestMatchesWhatThePackageDoes(t *testing.T) {
 	manifest := string(raw)
 
 	want := map[string]string{
-		"network":    "false",
+		"network":    "true",
 		"filesystem": "true",
 		"exec":       "true",
 		"migrations": "false",
@@ -44,12 +44,12 @@ func TestTheManifestMatchesWhatThePackageDoes(t *testing.T) {
 		t.Error(`arandu.mod.toml must name the package "hyz-is/piper"`)
 	}
 
-	// The sources behind the declaration: no network, no framework.
+	// The sources behind the declaration: no database, no framework.
 	files, err := filepath.Glob("../../*.go")
 	if err != nil || len(files) == 0 {
 		t.Fatalf("no sources found: %v", err)
 	}
-	forbidden := []string{"net", "net/http", "database/sql", "github.com/arandu-io/"}
+	forbidden := []string{"database/sql", "github.com/arandu-io/"}
 	for _, file := range files {
 		parsed, err := parser.ParseFile(token.NewFileSet(), file, nil, parser.ImportsOnly)
 		if err != nil {
