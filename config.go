@@ -100,7 +100,10 @@ type Config struct {
 	// system's temporary directory.
 	TempDir string
 	// Env holds extra "KEY=VALUE" entries for the program, such as
-	// "OMP_NUM_THREADS=2" to limit the CPU it uses. The program does not
+	// "PIPER_ORT_THREADS=2" for docs/sitecustomize.py, which limits the threads of
+	// onnxruntime. OMP_NUM_THREADS does not: the onnxruntime of the piper-tts
+	// wheel is not built on OpenMP, and without a limit it starts a thread per
+	// core it sees. The program does not
 	// inherit the application's environment: it gets PATH, LANG, PYTHONUTF8,
 	// HOME and TMPDIR (the last two pointing at the call's private directory)
 	// and these entries, so a secret the application holds is never handed to

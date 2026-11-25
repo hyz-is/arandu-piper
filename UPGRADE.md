@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.3.1
+
+Nothing to change. `Remote` now waits up to `BusyWait` (5 seconds) when every node is busy, where it used to fail at once; set `BusyWait: -1` to keep the old behaviour. If you limited Piper's threads with `OMP_NUM_THREADS`, it never took effect: see `docs/sitecustomize.py`.
+
 ## 0.3.0
 
 Nothing to change: every addition is optional and the API of 0.2.0 is intact.

@@ -35,6 +35,7 @@ not list it.
 | `remote.go` | `Remote`, `ParseNodes`, `Health`: a `Speaker` and `Keyed` over several nodes with failover and a cooldown |
 | `plain.go` | `Plain`, which strips WhatsApp and Markdown formatting and emojis before the text is spoken |
 | `fake.go` | `Fake`, the scripted `Speaker` for an application's tests |
+| `docs/sitecustomize.py` | the shim that limits onnxruntime's threads and turns its telemetry off, for the image of an application |
 | `docs/Dockerfile.snippet` | the build and runtime stages that put Piper and a voice in an application's image; it was built and run, keep it that way when a digest or version changes |
 | `tests/Unit/service_test.go` | the handler, the remote (rotation, failover, cooldown, key, health) and the two together |
 | `tests/Unit/piper_test.go` | the client against stand-in `piper` and `ffmpeg` scripts, against the real ffmpeg when present, against the real Piper when `PIPER_BIN` and `PIPER_MODEL` are set, and the fake |
