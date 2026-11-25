@@ -479,3 +479,57 @@ func TestRemoteAgainstARealHandler(t *testing.T) {
 		t.Fatalf("%v", err)
 	}
 }
+
+func TestRemoteWaitsWhenEveryNodeIsBusyAndGoesThroughWhenOneFrees(t *testing.T) {
+	a, b := newNode(t, "a"), newNode(t, "b")
+	a.set("busy")
+	b.set("busy")
+	r := remote(t, func(c *piper.RemoteConfig) { c.BusyWait = 3 * time.Second }, a, b)
+	go func() { time.Sleep(300 * time.Millisecond); b.set("ok") }()
+	au, err := r.Speak(context.Background(), "Anotado.")
+	if err != nil || string(au.Data) != "audio-of-b" {
+		t.Fatalf("%+v %v", au, err)
+	}
+	if a.calls.Load()+b.calls.Load() < 3 {
+		t.Fatal("the round was not repeated")
+	}
+}
+
+func TestRemoteGivesUpAfterBusyWaitAndCanBeToldNotToWait(t *testing.T) {
+	a := newNode(t, "a")
+	a.set("busy")
+	start := time.Now()
+	_, err := remote(t, func(c *piper.RemoteConfig) { c.BusyWait = 600 * time.Millisecond }, a).Speak(context.Background(), "Anotado.")
+	if !errors.Is(err, piper.ErrNoNodes) || time.Since(start) < 400*time.Millisecond || time.Since(start) > 3*time.Second {
+		t.Fatalf("%v after %s", err, time.Since(start))
+	}
+	before := a.calls.Load()
+	start = time.Now()
+	_, err = remote(t, func(c *piper.RemoteConfig) { c.BusyWait = -1 }, a).Speak(context.Background(), "Anotado.")
+	if !errors.Is(err, piper.ErrNoNodes) || a.calls.Load()-before != 1 || time.Since(start) > 300*time.Millisecond {
+		t.Fatalf("%v, %d calls, after %s", err, a.calls.Load()-before, time.Since(start))
+	}
+}
+
+func TestRemoteDoesNotWaitForANodeThatFails(t *testing.T) {
+	a, b := newNode(t, "a"), newNode(t, "b")
+	a.set("busy")
+	b.set("fail")
+	start := time.Now()
+	_, err := remote(t, func(c *piper.RemoteConfig) { c.BusyWait = 3 * time.Second }, a, b).Speak(context.Background(), "Anotado.")
+	if !errors.Is(err, piper.ErrNoNodes) || time.Since(start) > time.Second {
+		t.Fatalf("%v after %s", err, time.Since(start))
+	}
+}
+
+func TestRemoteTheWaitStopsWithTheCallersContext(t *testing.T) {
+	a := newNode(t, "a")
+	a.set("busy")
+	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	_, err := remote(t, func(c *piper.RemoteConfig) { c.BusyWait = time.Minute }, a).Speak(ctx, "Anotado.")
+	if err == nil || time.Since(start) > 2*time.Second {
+		t.Fatalf("%v after %s", err, time.Since(start))
+	}
+}

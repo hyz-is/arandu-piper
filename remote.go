@@ -32,7 +32,17 @@ const (
 	DefaultRemotePath = "/speak"
 	// DefaultHealthPath is the health endpoint Remote.Health reads.
 	DefaultHealthPath = "/_arandu/health"
+	// DefaultBusyWait is how long a call keeps trying when every node answered
+	// busy.
+	DefaultBusyWait = 5 * time.Second
+	// busyBackoff is the first pause between two rounds over busy nodes; it
+	// doubles up to maxBusyBackoff.
+	busyBackoff    = 200 * time.Millisecond
+	maxBusyBackoff = time.Second
 )
+
+// errNodeBusy marks a node's 429: it is working at its limit, not unwell.
+var errNodeBusy = errors.New("busy")
 
 // maxRemoteAudio bounds the audio read back from a node.
 const maxRemoteAudio = maxOutputBytes
@@ -93,6 +103,13 @@ type RemoteConfig struct {
 	// MaxChars is the longest text sent, refused here before any network. Zero
 	// means DefaultMaxChars.
 	MaxChars int
+	// BusyWait is how long a call keeps going round the nodes when every one of
+	// them answered 429 (busy, not failing): each round waits a little longer,
+	// up to BusyWait in all, and the call fails with ErrNoNodes only after it. A
+	// burst of more calls than the nodes can take at once then waits its turn
+	// instead of failing. Zero means DefaultBusyWait; a negative value turns the
+	// wait off and a call fails as soon as one round found every node busy.
+	BusyWait time.Duration
 	// KeyTag is part of every Key. The audio depends on settings only the
 	// nodes know (the voice files, the pace, the format), so change the tag
 	// when they change and a Cache stops answering with the old audio. Empty
@@ -116,6 +133,7 @@ type Remote struct {
 	cooldown   time.Duration
 	maxChars   int
 	keyTag     string
+	busyWait   time.Duration
 	http       *http.Client
 	next       atomic.Uint64
 	now        func() time.Time
@@ -155,6 +173,7 @@ func NewRemote(cfg RemoteConfig) (*Remote, error) {
 		cooldown:   cfg.Cooldown,
 		maxChars:   cfg.MaxChars,
 		keyTag:     cfg.KeyTag,
+		busyWait:   cfg.BusyWait,
 		http:       cfg.HTTPClient,
 		now:        time.Now,
 	}
@@ -188,6 +207,9 @@ func NewRemote(cfg RemoteConfig) (*Remote, error) {
 	}
 	if r.maxChars == 0 {
 		r.maxChars = DefaultMaxChars
+	}
+	if r.busyWait == 0 {
+		r.busyWait = DefaultBusyWait
 	}
 	if r.http == nil {
 		r.http = &http.Client{Transport: &http.Transport{
@@ -223,7 +245,7 @@ func (r *Remote) Speak(ctx context.Context, text string) (Audio, error) {
 // SpeakAs sends the text to the next healthy node. A node that is busy,
 // unreachable, timed out or failing is skipped for this call and, after
 // FailureThreshold failures in a row, for Cooldown; the next node is tried at
-// once. A refusal another node would repeat (empty or too long text, an
+// once, and when every node was busy the round is repeated for up to BusyWait. A refusal another node would repeat (empty or too long text, an
 // unknown voice) is returned as the same sentinel error the local client
 // gives. When every node failed the error wraps ErrNoNodes and the last node's
 // error.
@@ -239,22 +261,42 @@ func (r *Remote) SpeakAs(ctx context.Context, voice Voice, text string) (Audio, 
 	if err != nil {
 		return Audio{}, err
 	}
-	var last error
-	for _, n := range r.order() {
-		if err := ctx.Err(); err != nil {
-			return Audio{}, err
+	deadline := time.Now().Add(r.busyWait)
+	pause := busyBackoff
+	for {
+		var last error
+		allBusy := true
+		for _, n := range r.order() {
+			if err := ctx.Err(); err != nil {
+				return Audio{}, err
+			}
+			audio, retry, err := r.call(ctx, n, body)
+			if err == nil {
+				n.succeed()
+				return audio, nil
+			}
+			if !retry {
+				return Audio{}, err
+			}
+			if !errors.Is(err, errNodeBusy) {
+				allBusy = false
+			}
+			last = err
 		}
-		audio, retry, err := r.call(ctx, n, body)
-		if err == nil {
-			n.succeed()
-			return audio, nil
+		// Only a round in which every node was busy is worth another: a node
+		// that failed was already skipped for the next call, and waiting does
+		// not mend it.
+		remaining := time.Until(deadline)
+		if !allBusy || r.busyWait < 0 || remaining <= 0 {
+			return Audio{}, fmt.Errorf("%w: %w", ErrNoNodes, last)
 		}
-		if !retry {
-			return Audio{}, err
+		select {
+		case <-time.After(min(pause, remaining)):
+		case <-ctx.Done():
+			return Audio{}, ctx.Err()
 		}
-		last = err
+		pause = min(pause*2, maxBusyBackoff)
 	}
-	return Audio{}, fmt.Errorf("%w: %w", ErrNoNodes, last)
 }
 
 // Key names the audio SpeakAs would make of text with voice, without making
@@ -365,7 +407,7 @@ func (r *Remote) call(ctx context.Context, n *remoteNode, body []byte) (Audio, b
 	case codeBusy:
 		// Busy is not sick: skip the node for this call and leave it in the
 		// rotation.
-		return Audio{}, true, fmt.Errorf("piper: node %s is busy", n.Name)
+		return Audio{}, true, fmt.Errorf("piper: node %s is %w", n.Name, errNodeBusy)
 	case codeCanceled:
 		return Audio{}, false, context.Canceled
 	case codeTimeout:

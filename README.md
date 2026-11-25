@@ -338,9 +338,13 @@ or failing is skipped at once and the next one is tried; after
 (30 s), and when every node is out they are all tried as a last resort. A refusal
 another node would repeat (empty or too long text, an unknown voice, a wrong
 token) is returned as it is, as the same `errors.Is` sentinel the local client
-returns. `Remote.Key` has no network: it hashes the voice, the cleaned text and
+returns. When every node answers 429 the round is repeated for up to `BusyWait` (5 s) before the call fails. `Remote.Key` has no network: it hashes the voice, the cleaned text and
 `KeyTag`, which you change when the nodes' voices or settings change.
 `Remote.Health(ctx)` asks every node's `/_arandu/health`.
+
+### Limit Piper's threads
+
+The onnxruntime of the `piper-tts` wheel starts one thread per core it sees. On a 32-core host in a container limited to two CPUs that is a sentence of six seconds taking eight to synthesize; with two threads it takes about one and a half. `OMP_NUM_THREADS` does not reach it. Copy `docs/sitecustomize.py` into the directory `PYTHONPATH` names and pass `PIPER_ORT_THREADS=2` in `Config.Env`. The file also turns onnxruntime's telemetry off.
 
 ## Config
 

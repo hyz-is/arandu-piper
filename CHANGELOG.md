@@ -10,6 +10,17 @@ a release is corrected by another release and never by moving a tag.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-11-25
+
+### Added
+
+- `RemoteConfig.BusyWait` (default `DefaultBusyWait`, 5 seconds): when every node answered 429, the round is repeated, with a pause that grows from 200 ms to 1 s, until a node frees or `BusyWait` is over, and only then does the call fail with `ErrNoNodes`. A burst of more calls than the nodes take at once waits its turn instead of failing. A negative value restores the old behaviour. A node that fails (not busy) is still not waited for.
+- `docs/sitecustomize.py`: limits the threads of onnxruntime from `PIPER_ORT_THREADS` and turns its telemetry off. Put it in the directory `PYTHONPATH` names (`/opt/piper`), and pass `PIPER_ORT_THREADS=<n>` in `Config.Env`.
+
+### Fixed
+
+- The documentation of `Config.Env` suggested `OMP_NUM_THREADS=2` to limit the CPU Piper uses. The onnxruntime of the `piper-tts` wheel does not read it: it starts a thread per core it sees, and under a CPU quota of two cores a sentence of six seconds took eight to synthesize where two threads take one and a half (measured on a Xeon E5-2667 v4 shared with other work). The comment now says so and names the shim.
+
 ## [0.3.0] - 2026-11-24
 
 ### Added
