@@ -17,8 +17,8 @@ network = true
 # private temporary directory (Config.TempDir), reads it back, and removes the
 # directory before returning. Piper also reads the configured voice files.
 filesystem = true
-# It starts piper, and ffmpeg for Opus, by the paths in Config, without a shell
-# and with fixed arguments.
+# It starts piper, kokoro-speak (the Kokoro voices) and ffmpeg for Opus, by the
+# paths in Config, without a shell and with fixed arguments.
 exec = true
 # It owns no table.
 migrations = false

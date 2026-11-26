@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.4.0
+
+Nothing to change: the API of 0.3.2 is intact and a client that does not set `Config.Kokoro` is the client it was. The keys of Piper audio are the ones 0.3.2 made.
+
+- To add the female Brazilian voice, install the Kokoro runtime and model in the service image (`docs/Dockerfile.kokoro.snippet`: the packages of `docs/kokoro-requirements.txt` by `pip --target`, `kokoro-v1.0.onnx` and `voices-v1.0.bin`, checked by sha256, and `docs/kokoro-speak.py` with the interpreter on its first line), and set `Config.Kokoro` with the three paths and `Env: PYTHONPATH=/opt/kokoro`. The service's configuration then serves `pf_dora`, `pm_alex` and `pm_santa` beside the Piper voices; give `DefaultVoice` the voice you want when none is named.
+- A node of a service that will not serve Kokoro needs nothing, but an application whose `Remote` calls it for a Kokoro voice gets `ErrUnknownVoice` once every node has refused it. Call `Remote.Voices(ctx)` at boot to see which node serves what.
+- `Remote` now asks the next node when one answers `unknown_voice` (see the changelog). Code that relied on the first refusal being final sees the same `errors.Is(err, piper.ErrUnknownVoice)`, after one request to each node.
+- A `Handler` answers `GET` with a valid token with the list of voices. Nothing calls it that did not before; a proxy that forbids `GET` on the path only loses `Remote.Voices`, and the calls themselves still work.
+
 ## 0.3.2
 
 Nothing to change.

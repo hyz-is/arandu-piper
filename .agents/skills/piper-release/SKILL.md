@@ -46,6 +46,16 @@ has them, and say in the release notes that you did. When `docs/Dockerfile.snipp
 changes (a version, a digest, a voice), build it and run `TestRealPiper` inside
 the image it makes, as the file's header says it was.
 
+`TestRealKokoro` runs the real Kokoro program when `KOKORO_BIN`,
+`KOKORO_MODEL` and `KOKORO_VOICES` are set (add `KOKORO_ENV=PYTHONPATH=...` for a
+`pip --target` install, `KOKORO_FFMPEG` and `KOKORO_SAMPLES`). When
+`docs/Dockerfile.kokoro.snippet`, `docs/kokoro-requirements.txt` or
+`docs/kokoro-speak.py` changes, rebuild the image and run the test inside it
+(`GOOS=linux CGO_ENABLED=0 go test -c`, then `docker run` with the test binary as
+the entrypoint and the `KOKORO_*` variables), and say so in the release notes.
+`docs/kokoro-requirements.txt` is made with `uv pip compile --universal
+--python-version 3.11 --generate-hashes`; change a version there, never by hand.
+
 CI runs the same four, and so does the release workflow on the tagged archive.
 
 ## What the manifest declares, and who reads it
@@ -126,8 +136,9 @@ in the changelog:
 - **A default.** `DefaultTimeout`, `DefaultMaxChars` and `DefaultOpusBitrate`
   are what an application gets by leaving the field empty, so moving one moves
   behaviour in every project that never mentioned it.
-- **The arguments passed to piper or ffmpeg**, or the environment the program
-  gets. They are the contract with Piper; a change that needs a newer Piper
+- **The arguments passed to piper, kokoro-speak or ffmpeg**, or the environment
+  the program gets. `docs/kokoro-speak.py` and `kokoro.go` are one contract: a
+  new option goes in both, and in the key when it changes the audio. They are the contract with Piper; a change that needs a newer Piper
   raises the minimum release in the README.
 - **An error that stops being, or starts being, a sentinel.** Applications branch
   on `errors.Is`.
