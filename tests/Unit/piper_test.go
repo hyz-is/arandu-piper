@@ -265,12 +265,27 @@ func TestSpeakLeavesTheNoiseToTheVoiceWhenItIsZero(t *testing.T) {
 func TestSpeakGivesPiperOneCleanLine(t *testing.T) {
 	r := newRig(t, "")
 	r.cfg.MaxChars = 200
+	r.cfg.Speech.Raw = true
 	script(t, r.dir, "piper", fmt.Sprintf("cat > %s/stdin.txt\nwhile [ $# -gt 0 ]; do [ \"$1\" = \"-f\" ] && out=$2; shift; done\n%s\n", r.dir, r.okPiper()))
 	text := "--help\r\n\r\nPrimeiro parágrafo.\n\tSegundo\x00 parágrafo.\u2028Terceiro."
 	if _, err := r.client(t).Speak(context.Background(), text); err != nil {
 		t.Fatal(err)
 	}
 	want := "--help Primeiro parágrafo. Segundo parágrafo. Terceiro.\n"
+	if got := r.read(t, "stdin.txt"); got != want {
+		t.Errorf("stdin = %q, want %q", got, want)
+	}
+}
+
+func TestSpeakGivesPiperTheSpeakableTextByDefault(t *testing.T) {
+	r := newRig(t, "")
+	r.cfg.MaxChars = 200
+	script(t, r.dir, "piper", fmt.Sprintf("cat > %s/stdin.txt\nwhile [ $# -gt 0 ]; do [ \"$1\" = \"-f\" ] && out=$2; shift; done\n%s\n", r.dir, r.okPiper()))
+	text := "*Treino*\r\n\r\n- Supino 3x10 com 42,5kg\n\tÀs 06:30\x00 de hoje \U0001F4AA"
+	if _, err := r.client(t).Speak(context.Background(), text); err != nil {
+		t.Fatal(err)
+	}
+	want := "Treino. Supino três séries de dez com quarenta e dois vírgula cinco quilos. Às seis e meia de hoje.\n"
 	if got := r.read(t, "stdin.txt"); got != want {
 		t.Errorf("stdin = %q, want %q", got, want)
 	}

@@ -1,6 +1,6 @@
 ---
 name: piper-package
-description: Install, wire and use the Piper package (github.com/hyz-is/arandu-piper) in an Arandu application. Use when the request is to "speak a reply", "text to speech", "answer with a voice note", "WhatsApp voice note from text", "use Piper", "use Kokoro", "a female voice", "pf_dora", "add piper to the app", "go get github.com/hyz-is/arandu-piper", "wire piper into bootstrap/app.go", "test code that speaks", "piper not found", "kokoro-speak", "ErrTimeout", "ErrTextTooLong", "ErrEmptyText", "ErrUnknownVoice", or when a project's go.mod already requires github.com/hyz-is/arandu-piper. Covers the paths in the application's config, the one construction in bootstrap, Speak and Plain, the errors, the Fake for tests, what must be installed on the server and in the image (Piper, and Kokoro for the voices it owns), which voices may be used commercially, which node of a service serves which voice, and why no text or audio goes into a log.
+description: Install, wire and use the Piper package (github.com/hyz-is/arandu-piper) in an Arandu application. Use when the request is to "speak a reply", "text to speech", "answer with a voice note", "WhatsApp voice note from text", "use Piper", "use Kokoro", "a female voice", "pf_dora", "add piper to the app", "go get github.com/hyz-is/arandu-piper", "wire piper into bootstrap/app.go", "test code that speaks", "piper not found", "kokoro-speak", "ErrTimeout", "ErrTextTooLong", "ErrEmptyText", "ErrUnknownVoice", or when a project's go.mod already requires github.com/hyz-is/arandu-piper. Covers the paths in the application's config, the one construction in bootstrap, Speak, Speakable and Plain, the errors, the Fake for tests, what must be installed on the server and in the image (Piper, and Kokoro for the voices it owns), which voices may be used commercially, which node of a service serves which voice, and why no text or audio goes into a log.
 license: MIT
 metadata:
   audience: app
@@ -96,9 +96,17 @@ the README has the sha256 of each file):
 
 ## Use it
 
-- `audio, err := voice.Speak(ctx, piper.Plain(reply))`. `Plain` removes
-  WhatsApp and Markdown formatting, links and emojis, which a voice would
-  otherwise spell out. `audio.Data` is the file, `audio.MIMEType` is
+- `audio, err := voice.Speak(ctx, reply)`. Since 0.5.0 a `*Client` makes the
+  text speakable first (`piper.Speakable`: numbers, money, dates, times, units,
+  acronyms and symbols in words, formatting and emoji removed, list items as
+  sentences), for Brazilian Portuguese only, which is every voice of the package.
+  `Config.Speech` adds the application's lexicon (`Lexicon`), a cut for long
+  answers (`MaxWords`, `RestNote`), lines to skip, or `Raw: true` to speak the
+  text as given. `Normalizer.Speakable(text, now)` says dates relative to `now`;
+  store its text and `Version()` beside the original, and put the version in
+  `RemoteConfig.KeyTag`. `Plain` alone only removes WhatsApp and Markdown
+  formatting, links and emojis. For text that will be heard, give the model the
+  guideline of `docs/speech-ptbr.md` section 4. `audio.Data` is the file, `audio.MIMEType` is
   `audio/ogg; codecs=opus` or `audio/wav`, `audio.Duration` its length.
 - Errors: `ErrEmptyText` (nothing speakable: send the text instead),
   `ErrTextTooLong` (shorten or split, then speak), `ErrTimeout`, `ErrFailed`

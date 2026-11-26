@@ -128,8 +128,9 @@ func (c *Client) Speak(ctx context.Context, text string) (Audio, error) {
 // SpeakAs makes speech of text with voice, or with the default voice when
 // voice is empty, and returns it as Config.Format says. The text is
 // cleaned of control characters and its lines are joined into one, so a
-// message with several paragraphs is read straight through; call Plain first
-// when the text is a chat message with formatting. Speak refuses text longer
+// message with several paragraphs is read straight through. Unless
+// Config.Speech.Raw is set the text is first made speakable (see Speakable):
+// numbers, money, dates and symbols in words, formatting and emoji removed. Speak refuses text longer
 // than MaxChars before running anything, and ends all work, killing the
 // running program, when ctx is done or Timeout elapses.
 func (c *Client) SpeakAs(ctx context.Context, voice Voice, text string) (Audio, error) {
@@ -197,11 +198,47 @@ func (c *Client) prepare(voice Voice, text string) (voiceModel, string, error) {
 	if !speakable(spoken) {
 		return voiceModel{}, "", ErrEmptyText
 	}
+	// The limit is on the text that was given, and is checked before the rules
+	// run: a number in words is longer than the number.
 	if n := len([]rune(spoken)); n > c.maxChars {
 		return voiceModel{}, "", fmt.Errorf("%w: %d characters, the limit is %d", ErrTextTooLong, n, c.maxChars)
 	}
+	if c.speech.raw {
+		return v, spoken, nil
+	}
+	spoken = c.speech.Speakable(text, time.Time{})
+	if spoken == "" {
+		return voiceModel{}, "", ErrEmptyText
+	}
+	if n := len([]rune(spoken)); n > c.maxChars*speechGrowth {
+		return voiceModel{}, "", fmt.Errorf("%w: %d characters once spoken, the limit is %d", ErrTextTooLong, n, c.maxChars*speechGrowth)
+	}
 	return v, spoken, nil
 }
+
+// speechGrowth is how many times longer than MaxChars the spoken text may be:
+// "R$ 1.234.567,89" is five times as long in words.
+const speechGrowth = 4
+
+// Speakable is the text SpeakAs would say for text: what Config.Speech makes of
+// it, with dates in full. It is for an application that stores the text it
+// spoke beside the text it was given, to audit a voice note; it never fails and
+// is empty when nothing is left to say. NormalizerVersion says which rules made
+// it.
+func (c *Client) Speakable(text string) string {
+	return c.speech.Speakable(text, time.Time{})
+}
+
+// Normalizer is the verbalizer the client speaks through, for an application
+// that wants to say dates relative to a moment of its own
+// (Normalizer().Speakable(text, now)) and then speak the result with Speech.Raw
+// set, or with this client, which leaves it as it is.
+func (c *Client) Normalizer() *Normalizer { return c.speech }
+
+// NormalizerVersion is the version of the rules the client speaks through: put
+// it beside the spoken text you store, and in the key of a cache that is not
+// made with Key.
+func (c *Client) NormalizerVersion() string { return c.speech.Version() }
 
 // Key names the audio SpeakAs would make of text with voice (the default
 // voice when empty), without making it: two calls whose audio would be the
