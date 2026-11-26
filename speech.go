@@ -16,9 +16,13 @@ import (
 // rule changes what a text is turned into, so an application that stores the
 // original text and the spoken text beside it can tell which rules made the
 // second, and put the version in the key of a cache. The text of the
-// version is "ptbr-" and a number; Normalizer.Version adds the lexicon of the
-// application when it has one.
-const NormalizerVersion = "ptbr-1"
+// version is "ptbr-", the number of the rules, ".lex" and the version of the
+// shared dictionary (LexiconVersion); Normalizer.Version adds the lexicon of the
+// application when it has one. It moves with the rules and with the dictionary:
+// "ptbr-2" is the phonetic layer of 0.6.0 (names of the letters, spelled and
+// spoken acronyms, domains, identifiers, hour ranges), and "lex1" the first
+// version of lexicon/ptbr.json. A test holds that the two agree.
+const NormalizerVersion = "ptbr-2.lex1"
 
 // Speech configures how the text is turned into what a voice says. The zero
 // value is the default: Brazilian Portuguese, the base lexicon, every rule on.
@@ -54,6 +58,7 @@ type Speech struct {
 type Normalizer struct {
 	raw      bool
 	rules    []lexiconRule
+	index    map[string]string
 	maxWords int
 	restNote string
 	skip     []string
@@ -67,6 +72,7 @@ func NewNormalizer(speech Speech) *Normalizer {
 	n := &Normalizer{
 		raw:      speech.Raw,
 		rules:    compileLexicon(entries),
+		index:    lexiconIndex(entries),
 		maxWords: speech.MaxWords,
 		restNote: speech.RestNote,
 		keepCaps: speech.KeepCapitals,
@@ -106,8 +112,9 @@ func Speakable(text string) string {
 	return defaultNormalizer.Speakable(text, time.Time{})
 }
 
-// Version is the version of this normalizer: NormalizerVersion, followed by "+"
-// and eight hexadecimal characters that stand for the lexicon and the options
+// Version is the version of this normalizer: NormalizerVersion, which holds the
+// version of the rules and of the shared dictionary ("ptbr-2.lex1"), followed by
+// "+" and eight hexadecimal characters that stand for the lexicon and the options
 // when the application set any, or "raw" for a Raw one.
 func (n *Normalizer) Version() string { return n.version }
 
@@ -198,6 +205,8 @@ var (
 	reAmper     = regexp.MustCompile(`\s?&\s?`)
 	rePlus      = regexp.MustCompile(`\s\+\s`)
 	reHashNum   = regexp.MustCompile(`#(\d)`)
+	reHashTag   = regexp.MustCompile(`(^|[\s(])#(\p{L})`)
+	reHashAlone = regexp.MustCompile(`(^|\s)#(\s|$)`)
 	reSlashPer  = regexp.MustCompile(`(?i)\s?/\s?(mês|mes|ano|dia|semana|hora|min|minuto|treino|série|serie|repetição|rep|sessão|aula|parcela|pessoa|unidade|refeição)\b`)
 )
 
@@ -206,44 +215,44 @@ var (
 // number), so that a rule never takes apart what an earlier one has said.
 func (n *Normalizer) line(line string, now time.Time) string {
 	line = reMdLink.ReplaceAllString(line, "$1")
-	line = reEmail.ReplaceAllStringFunc(line, emailWords)
-	line = replaceURLs(line)
+	line = reEmail.ReplaceAllStringFunc(line, n.emailWords)
+	line = n.addresses(line)
 	line = reApprox.ReplaceAllString(line, "cerca de $1")
 	line = plainLine(line)
 	for _, r := range n.rules {
 		line = r.apply(line)
 	}
+	line = rePlate.ReplaceAllStringFunc(line, plateWords)
+	line = acronyms(line)
+	line = sub(reIPv4, line, func(m []int) (string, int, bool) { return ipWords(line, m) })
+	line = sub(reVersion, line, func(m []int) (string, int, bool) { return versionWords(line, m) })
+	line = reDayCount.ReplaceAllStringFunc(line, dayCountWords)
+	line = sub(reAllDay, line, func(m []int) (string, int, bool) { return allDayWords(line, m) })
+	line = sub(reIntlPhone, line, func(m []int) (string, int, bool) { return intlPhoneWords(line, m) })
+	line = reTollFree.ReplaceAllStringFunc(line, tollFreeWords)
+	line = sub(reCode, line, func(m []int) (string, int, bool) { return codeWords(line, m) })
+	line = sub(reHourRange, line, func(m []int) (string, int, bool) { return hourRangeWords(line, m) })
+	line = strings.NewReplacer("§§", "parágrafos ", "§", "parágrafo ").Replace(line)
 
 	line = reIDs.ReplaceAllStringFunc(line, idWords)
-	line = reISODate.ReplaceAllStringFunc(line, func(m string) string {
-		p := reISODate.FindStringSubmatch(m)
-		y, _ := strconv.Atoi(p[1])
-		mo, _ := strconv.Atoi(p[2])
-		d, _ := strconv.Atoi(p[3])
-		if out, ok := dateWords(d, mo, y, true, now); ok {
-			return out
-		}
-		return m
+	line = sub(reISODate, line, func(m []int) (string, int, bool) {
+		y, _ := strconv.Atoi(line[m[2]:m[3]])
+		mo, _ := strconv.Atoi(line[m[4]:m[5]])
+		d, _ := strconv.Atoi(line[m[6]:m[7]])
+		return dateInContext(line, m, d, mo, y, true, now)
 	})
-	line = reDateFull.ReplaceAllStringFunc(line, func(m string) string {
-		p := reDateFull.FindStringSubmatch(m)
-		d, _ := strconv.Atoi(p[1])
-		mo, _ := strconv.Atoi(p[2])
-		y, _ := strconv.Atoi(p[3])
-		if out, ok := dateWords(d, mo, y, true, now); ok {
-			return out
-		}
-		return m
+	line = sub(reDateFull, line, func(m []int) (string, int, bool) {
+		d, _ := strconv.Atoi(line[m[2]:m[3]])
+		mo, _ := strconv.Atoi(line[m[4]:m[5]])
+		y, _ := strconv.Atoi(line[m[6]:m[7]])
+		return dateInContext(line, m, d, mo, y, true, now)
 	})
+	line = sub(reDateShort, line, func(m []int) (string, int, bool) { return installmentWords(line, m) })
 	line = sub(reFraction, line, func(m []int) (string, int, bool) { return fractionOf(line, m) })
-	line = reDateShort.ReplaceAllStringFunc(line, func(m string) string {
-		p := reDateShort.FindStringSubmatch(m)
-		d, _ := strconv.Atoi(p[1])
-		mo, _ := strconv.Atoi(p[2])
-		if out, ok := dateWords(d, mo, yearOf(now), false, now); ok {
-			return out
-		}
-		return m
+	line = sub(reDateShort, line, func(m []int) (string, int, bool) {
+		d, _ := strconv.Atoi(line[m[2]:m[3]])
+		mo, _ := strconv.Atoi(line[m[4]:m[5]])
+		return dateInContext(line, m, d, mo, yearOf(now), false, now)
 	})
 	line = reSlashPair.ReplaceAllStringFunc(line, func(m string) string {
 		p := reSlashPair.FindStringSubmatch(m)
@@ -261,6 +270,8 @@ func (n *Normalizer) line(line string, now time.Time) string {
 	line = sub(reOrdinal, line, func(m []int) (string, int, bool) { return ordinalWords(line, m) })
 	line = reNumberSign.ReplaceAllString(line, "número ")
 	line = reHashNum.ReplaceAllString(line, "número $1")
+	line = reHashTag.ReplaceAllString(line, "${1}hashtag $2")
+	line = reHashAlone.ReplaceAllString(line, "${1}cerquilha${2}")
 	line = reSign.ReplaceAllStringFunc(line, func(m string) string {
 		p := reSign.FindStringSubmatch(m)
 		word := "menos "
@@ -291,6 +302,7 @@ func (n *Normalizer) line(line string, now time.Time) string {
 	}, line)
 	line = reRepeated.ReplaceAllString(line, "$1")
 	line = reDots.ReplaceAllString(line, ".")
+	line = bytesWords(line)
 	return tidy(line)
 }
 
@@ -337,11 +349,7 @@ func sub(re *regexp.Regexp, s string, fn func(m []int) (string, int, bool)) stri
 
 // ---- e-mail and links ----
 
-func emailWords(m string) string {
-	local, domain, _ := strings.Cut(m, "@")
-	say := strings.NewReplacer(".", " ponto ", "_", " underline ", "-", " hífen ", "+", " mais ")
-	return say.Replace(local) + " arroba " + say.Replace(domain)
-}
+// The e-mail, the domains and the paths are said by speech_phonetic.go.
 
 // replaceURLs says a web address as "o link": a voice cannot read it out, and
 // the text of the chat still has it. After a word that already says what it is
@@ -457,6 +465,63 @@ func dateWords(day, month, year int, hasYear bool, now time.Time) (string, bool)
 		return out, true
 	}
 	return SayDay(date, now), true
+}
+
+// dateInContext says the date at m and takes care of the words around it: after
+// "dia" the date is not said with its own "dia" ("vence dia 20/12" is "vence dia
+// vinte de dezembro"), and a date that is "hoje", "ontem" or "amanhã" next to the
+// same word already written ("ontem, 26/11") is not said twice.
+func dateInContext(s string, m []int, day, month, year int, hasYear bool, now time.Time) (string, int, bool) {
+	out, ok := dateWords(day, month, year, hasYear, now)
+	if !ok {
+		return "", 0, false
+	}
+	if strings.EqualFold(lastWord(s[:m[0]]), "dia") {
+		out = strings.TrimPrefix(out, "dia ")
+	}
+	switch out {
+	case "hoje", "ontem", "anteontem", "amanhã", "depois de amanhã":
+		before := strings.ToLower(strings.TrimRight(s[:m[0]], " ,(;:-–—"))
+		after := strings.ToLower(strings.TrimLeft(s[m[1]:], " ,()"))
+		if strings.HasSuffix(before, out) && (len(before) == len(out) || !isWordRune(runeBefore(before, len(before)-len(out)))) ||
+			strings.HasPrefix(after, out) && (len(after) == len(out) || !isWordRune(runeAt(after, len(out)))) {
+			return "", m[1], true
+		}
+	}
+	return out, m[1], true
+}
+
+// installmentWords says "3/12" after "parcela" as "três de doze": the number of
+// the installment and how many there are, and not the third of December. It
+// needs the context of an installment (the word before or after it) and a
+// first number that is not above the second, which is at most 48 (four years of
+// monthly payments); anything else is a date, as before.
+func installmentWords(s string, m []int) (string, int, bool) {
+	a, _ := strconv.Atoi(s[m[2]:m[3]])
+	b, _ := strconv.Atoi(s[m[4]:m[5]])
+	if !installmentOf(s[:m[0]], s[m[1]:], a, b) {
+		return "", 0, false
+	}
+	return NumberInWords(int64(a)) + " de " + NumberInWords(int64(b)), m[1], true
+}
+
+var installmentWord = map[string]bool{
+	"parcela": true, "parcelas": true, "prestação": true, "prestações": true, "prestacao": true, "prestacoes": true,
+	"mensalidade": true, "mensalidades": true,
+}
+
+// reInstallmentBefore is the end of the text before "3/12": the word of an
+// installment, with an optional "nº" or "número" between, and the pairs that
+// came before in a list ("parcelas 10/12 e 11/12").
+var reInstallmentBefore = regexp.MustCompile(`(?i)\b(?:parcelas?|presta(?:ç|c)(?:ão|ões|ao|oes)|mensalidades?)\s*(?:n[ºo°.]{1,2}\s*|n[úu]mero\s+)?(?:\d{1,2}/\d{1,2}\s*(?:,|e)\s*)*$`)
+
+// installmentOf reports whether "a/b", with the text before and after it, is the
+// number of an installment.
+func installmentOf(before, after string, a, b int) bool {
+	if a < 1 || a > b || b > 48 {
+		return false
+	}
+	return reInstallmentBefore.MatchString(before) || installmentWord[nextWord(after)]
 }
 
 func yearOf(now time.Time) int {
@@ -906,6 +971,13 @@ var abbreviations = []struct {
 	{regexp.MustCompile(`\baprox\.`), "aproximadamente", false},
 	{regexp.MustCompile(`\bp\.\s?ex\.`), "por exemplo", false},
 	{regexp.MustCompile(`\bex\.(?:\s|:|$)`), "por exemplo ", false},
+	{regexp.MustCompile(`\bEx\.:`), "exemplo:", false},
+	{regexp.MustCompile(`\bEx\.(?:\s|$)`), "exemplo ", false},
+	{regexp.MustCompile(`\bLtda\.`), "limitada", true},
+	{regexp.MustCompile(`\bCia\.`), "companhia", false},
+	{regexp.MustCompile(`\bAv\.`), "avenida", false},
+	{regexp.MustCompile(`\bS\.A\.`), "sociedade anônima", true},
+	{regexp.MustCompile(`\bS/A\b`), "sociedade anônima", false},
 	{regexp.MustCompile(`\betc\.`), "etcétera", true},
 	{regexp.MustCompile(`\bSra\.`), "senhora", false},
 	{regexp.MustCompile(`\bSr\.`), "senhor", false},

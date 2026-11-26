@@ -36,7 +36,12 @@ not list it.
 | `handler.go` | `Handler`: `POST` text and voice, the audio back, `GET` the voices the node serves (`VoiceLister`), bearer tokens per client, body and concurrency limits, the wire error codes |
 | `remote.go` | `Remote`, `ParseNodes`, `Health`, `Voices`: a `Speaker` and `Keyed` over several nodes with failover, a cooldown and routing of a voice to the nodes that serve it |
 | `plain.go` | `Plain`, which strips WhatsApp and Markdown formatting and emojis before the text is spoken |
-| `speech.go` | `Speech`, `Normalizer`, `Speakable` and `NormalizerVersion`: the Brazilian Portuguese verbalizer every voice speaks through by default (dates, times, money, ranges, fitness notation, symbols, prosody), line by line in the order of the rules |
+| `speech.go` | `Speech`, `Normalizer`, `Speakable` and `NormalizerVersion`: the Brazilian Portuguese verbalizer every voice speaks through by default (dates, installments, times, money, ranges, fitness notation, symbols, prosody), line by line in the order of the rules |
+| `speech_phonetic.go` | the phonetic layer: `LetterName`, `SpellAcronym`, `ReadsAsWord`, the acronyms, the domains, paths and e-mails, the units of data said as pronounced |
+| `speech_ids.go` | identifiers against quantities: plates, IP, versions, protocols and codes, telephones, `24/7`, `D+1`, ranges of hours |
+| `speech_dictionary.go` | `lexicon/ptbr.json` embedded, `ParseLexicon`, `LexiconJSON`, `LexiconVersion` |
+| `lexicon/ptbr.json` | the shared pronunciation dictionary; a change to it raises its `version` and `NormalizerVersion` |
+| `speech_validate.go` | `Validate`, `Normalizer.Validate`, `Normalizer.Check`, `Issue`: no number may change between the text and the speech |
 | `speech_numbers.go` | `NumberInWords`, `NumberInWordsFeminine`, `OrdinalInWords`, `MoneyInWords` and the currencies |
 | `speech_lexicon.go` | `LexiconEntry`, `BaseLexicon`, the units of measure and the feminine nouns |
 | `docs/speech-ptbr.md` | the study behind the verbalizer, with its sources, the rules and choices, the measured accuracy, and the guideline an application pastes into the system prompt of a model whose answer will be spoken |
@@ -54,6 +59,11 @@ not list it.
 | `tests/Unit/cache_test.go` | the reuse, a failing store, identical calls at the same time |
 | `tests/Unit/plain_test.go` | `Plain` |
 | `tests/Unit/speech_test.go` | every rule of the verbalizer, table by table, with real fitness and finance sentences, and that `Speakable` of a spoken text is itself |
+| `tests/Unit/speech_phonetic_test.go` | the letters, the acronyms, the domains and e-mails, the foreign words, and that no output is a lone accented vowel |
+| `tests/Unit/speech_ids_test.go` | the identifiers, the units and the symbols of the phonetic layer |
+| `tests/Unit/speech_dictionary_test.go` | the shared dictionary, `ParseLexicon`, the version that names both |
+| `tests/Unit/speech_validate_test.go` | the validator: what the verbalizer says passes, what changed fails |
+| `tests/Unit/speech_defects_test.go` | the five defects of 0.5.0 reported by Corujão.ai, one test each |
 | `tests/Unit/speech_domain_test.go` | the finance lexicon and the cases of Corujão.ai's own tests, through the module |
 | `tests/Unit/speech_client_test.go` | the client: both engines get the speakable text, `pt-br`, `Raw`, the key, the limit |
 | `tests/Unit/manifest_test.go` | `arandu.mod.toml` held against the imports |
@@ -105,9 +115,9 @@ not list it.
   commercial use. Say so wherever a voice is recommended.
 - **What a voice says is decided by `Speakable`, in code.** A number, a date or an
   amount of money is never left to the model that wrote the answer, nor to
-  espeak-ng. A change to a rule that changes what a text is turned into raises
-  `NormalizerVersion`, gets a row in the table of `tests/Unit/speech_test.go` and
-  a line in `docs/speech-ptbr.md`; every voice of this package speaks Brazilian
+  espeak-ng. A change to a rule or to `lexicon/ptbr.json` that changes what a text is turned into raises
+  `NormalizerVersion` (the number of the rules and the version of the dictionary agree, a test holds it), gets a row in the table of `tests/Unit/speech_test.go` and
+  a line in `docs/speech-ptbr.md`; the names of the letters never carry an accent alone on a vowel (espeak-ng spells it out: "í" is "i agudo"), and a test holds it; every voice of this package speaks Brazilian
   Portuguese, and Kokoro is called with `pt-br`, never `pt`. The verbalizer reads
   no clock (a date is relative only when the caller passes `now`) and imports
   nothing but the standard library.

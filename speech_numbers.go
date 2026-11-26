@@ -178,7 +178,7 @@ type currency struct {
 
 var currencies = map[string]currency{
 	"R$":  {"real", "reais", "centavo", "centavos", "zero real", "de reais"},
-	"US$": {"dólar", "dólares", "centavo", "centavos", "zero dólar", "de dólares"},
+	"US$": {"dólar americano", "dólares americanos", "centavo", "centavos", "zero dólar americano", "de dólares americanos"},
 	"$":   {"dólar", "dólares", "centavo", "centavos", "zero dólar", "de dólares"},
 	"€":   {"euro", "euros", "centavo", "centavos", "zero euro", "de euros"},
 }

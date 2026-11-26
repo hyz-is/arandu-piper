@@ -124,7 +124,7 @@ func TestSpeakable(t *testing.T) {
 		{"money mil", "Vale R$ 2 mil.", "Vale dois mil reais."},
 		{"money milhões", "Vale R$ 3 milhões.", "Vale três milhões de reais."},
 		{"money negative", "Saldo de -R$ 50,00.", "Saldo de menos cinquenta reais."},
-		{"dollar and euro", "US$ 10 e € 1,50.", "dez dólares e um euro e cinquenta centavos."},
+		{"dollar and euro", "US$ 10 e € 1,50.", "dez dólares americanos e um euro e cinquenta centavos."},
 		{"per month", "Pague R$ 19,00/mês.", "Pague dezenove reais por mês."},
 
 		// Times and dates.
@@ -166,7 +166,7 @@ func TestSpeakable(t *testing.T) {
 		// Units.
 		{"km/h", "Corra a 10 km/h.", "Corra a dez quilômetros por hora."},
 		{"one km/h", "Corra a 1 km/h.", "Corra a um quilômetro por hora."},
-		{"bpm", "FC em 150 bpm.", "FC em cento e cinquenta batimentos por minuto."},
+		{"bpm", "FC em 150 bpm.", "éfe cê em cento e cinquenta batimentos por minuto."},
 		{"grams", "Coma 200g de frango.", "Coma duzentos gramas de frango."},
 		{"mg and ml", "Tome 500 mg com 200 ml.", "Tome quinhentos miligramas com duzentos mililitros."},
 		{"litres", "Beba 1,5 L e 2 l.", "Beba um vírgula cinco litros e dois litros."},
@@ -180,9 +180,9 @@ func TestSpeakable(t *testing.T) {
 		{"upper case unit", "Pesa 80 KG.", "Pesa oitenta quilos."},
 
 		// Acronyms, abbreviations, symbols.
-		{"acronyms", "Informe o CPF e o CNPJ no IRPF.", "Informe o cê pê efe e o cê ene pê jota no i érre pê efe."},
-		{"fitness acronyms", "Treine com RPE 8 e RIR 2.", "Treine com érre pê é oito e érre i érre dois."},
-		{"pix and inss", "Pague pelo Pix ou INSS e FGTS.", "Pague pelo pics ou i ene ésse ésse e éfe gê tê ésse."},
+		{"acronyms", "Informe o CPF e o CNPJ no IRPF.", "Informe o cê pê éfe e o cê êne pê jota no i érre pê éfe."},
+		{"fitness acronyms", "Treine com RPE 8 e RIR 2.", "Treine com érre pê êh oito e érre i érre dois."},
+		{"pix and inss", "Pague pelo Pix ou INSS e FGTS.", "Pague pelo pics ou i êne ésse ésse e éfe gê tê ésse."},
 		{"abbreviations", "O Sr. Silva e a Dra. Lima aprox. 3 horas p.ex. hoje.", "O senhor Silva e a doutora Lima aproximadamente três horas por exemplo hoje."},
 		{"etc at the end", "Frango, arroz, etc.", "Frango, arroz, etcétera."},
 		{"etc in the middle", "Frango, arroz, etc. e feijão.", "Frango, arroz, etcétera e feijão."},
@@ -192,11 +192,12 @@ func TestSpeakable(t *testing.T) {
 		{"equals and approx", "Total = ~300 kcal.", "Total igual a cerca de trezentas calorias."},
 		{"slash between words", "Treino A/B.", "Treino A, B."},
 		{"hash number", "Meta #1 do mês.", "Meta número um do mês."},
-		{"url", "Veja https://exemplo.com/treino?id=1 agora.", "Veja o link agora."},
-		{"url after link", "O link https://exemplo.com é seu.", "O link mostrado na conversa é seu."},
+		{"url that cannot be dictated", "Veja https://exemplo.com/treino?id=1 agora.", "Veja o linque agora."},
+		{"short address is said", "O link https://exemplo.com é seu.", "O linque exemplo ponto com é seu."},
+		{"long address after link stays in the chat", "O link https://www.exemplo.com/treino?id=1 é seu.", "O linque mostrado na conversa é seu."},
 		{"markdown link", "Veja [o plano](https://exemplo.com/p) hoje.", "Veja o plano hoje."},
-		{"e-mail", "Escreva para ajuda@hyz.is.", "Escreva para ajuda arroba hyz ponto is."},
-		{"cpf digits", "CPF 123.456.789-09.", "cê pê efe um dois três, quatro cinco seis, sete oito nove, zero nove."},
+		{"e-mail", "Escreva para ajuda@hyz.is.", "Escreva para ajuda arroba hyz ponto i ésse."},
+		{"cpf digits", "CPF 123.456.789-09.", "cê pê éfe um dois três, quatro cinco seis, sete oito nove, zero nove."},
 		{"postcode", "CEP 01310-100.", "cép zero um três um zero, um zero zero."},
 		{"telephone", "Ligue (11) 99999-8888.", "Ligue um um, nove nove nove nove nove, oito oito oito oito."},
 

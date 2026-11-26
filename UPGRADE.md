@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 0.6.0
+
+No exported name was removed or changed: `apidiff` against 0.5.0 shows only additions (`LetterName`, `SpellAcronym`, `ReadsAsWord`, `ParseLexicon`, `LexiconJSON`, `LexiconVersion`, `Validate`, `Normalizer.Validate`, `Normalizer.Check`, `Issue`, `IssueKind`, `Severity` and their constants, `HasErrors`). What changes is what a `*Client` says, on purpose, and `NormalizerVersion`.
+
+- **`NormalizerVersion` is `"ptbr-2.lex1"`** (it was `"ptbr-1"`). It is a constant string: a comparison with the old value, or a cache key that was built with it, moves with it. Put it in `RemoteConfig.KeyTag` as before.
+- **Cache keys change** for any text with an acronym, a domain, an e-mail, an identifier (plate, IP, version, protocol), a range of hours, `24/7`, `D+1`, a unit of data, a foreign word of the dictionary, `§` or `#`. The audio stored under the old keys is not wrong, it is the 0.5.0 speech, and a `Cache` makes it again on the first call. Nothing to migrate; a text of words and plain numbers keeps its key.
+- **The speech changes where the engine guessed.** "ajuda@ctrl.fit" was "ajuda arroba ctrl ponto fit" and is now "ajuda arroba cê tê érre éle ponto fít"; "CPF" was "cê pê efe" and is "cê pê éfe"; "RPE" was "érre pê é" and is "érre pê êh"; "08h às 17h" was "de oito horas às dezessete horas" and is "das oito às dezessete horas"; "US$ 10" is "dez dólares americanos"; `FC` is "éfe cê". Read the table of section 3 of `docs/speech-ptbr.md`, and `CHANGELOG.md`, for the list.
+- **An application that passes its own `Speech.Lexicon`** keeps winning: its entries run first. Check the ones that repeat a term of the shared dictionary (CPF, IMC, WhatsApp...): the dictionary now spells with `êh`, `ôh`, `i` and `u` where the spoken letter names have an accent, because espeak-ng spells a lone accented vowel out ("i agudo"). If your lexicon spells with "í", "ê", "ô" or "ú" alone, replace them. `ParseLexicon` reads a lexicon from a JSON file in the format of `lexicon/ptbr.json` into the `[]LexiconEntry` that `Speech.Lexicon` takes.
+- **Five defects of 0.5.0 are fixed** (see "Fixed" in `CHANGELOG.md`), so an application that worked around them can drop the workaround: "dia" is not said twice before a date, `parcela 3/12` is "três de doze", the lexicon of the application applies inside domains and e-mails (matching without accents, so a lexicon with "Corujão" speaks `ajuda@corujao.ai` as "corujão"), a relative date next to the word it becomes is not said twice ("ontem, 26/11" is "ontem"), and `e-mail` and `link` are "imêil" and "linque". The audio of a text with any of them changes, and so does its key.
+- **`MaxChars`** still counts the text as given; an address or an identifier says more words than it has characters, so the spoken text may be longer than before (the limit of four times still holds).
+- **To validate**, call `n.Check(reply, now)` where you used `n.Speakable(reply, now)`, and refuse the audio when `piper.HasErrors(issues)` (send the text alone). A warning is something a person may want to look at, not a failure.
+- **The system prompt**: section 4 of `docs/speech-ptbr.md` is now the 17-rule guideline of the study of 26/11/2026; replace the earlier text in the prompt. The model writes plain notation (`R$ 24,90`, `3x12`, `06:30`) and the code says it.
+
 ## 0.5.0
 
 No exported name was removed or changed: `apidiff` against 0.4.0 shows only additions. What changes is what a `*Client` says, on purpose.

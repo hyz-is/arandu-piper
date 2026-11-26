@@ -2,6 +2,7 @@ package piper
 
 import (
 	"regexp"
+	"sort"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -26,56 +27,16 @@ type LexiconEntry struct {
 }
 
 // BaseLexicon is the lexicon the package ships for Brazilian Portuguese: the
-// acronyms, documents and borrowed words that are said the same way in every
-// product, and no word that belongs to one business. A domain adds its own
-// through Speech.Lexicon, and an entry of the domain wins over one of this list
-// that has the same Written. It returns a copy, so a caller may append to it.
+// central dictionary of lexicon/ptbr.json, with its acronyms (spelled with the
+// names of the letters), documents, borrowed words and brands that are said the
+// same way in every product, and no word that belongs to one business. A domain
+// adds its own through Speech.Lexicon, and an entry of the domain wins over one
+// of this list that has the same Written. The entries come longest term first.
+// It returns a copy, so a caller may append to it.
 //
 // Words espeak-ng already says well ("Nubank", "Itaú", "Serasa") are not here.
 func BaseLexicon() []LexiconEntry {
 	return append([]LexiconEntry(nil), baseLexicon...)
-}
-
-var baseLexicon = []LexiconEntry{
-	// Documents and the State.
-	{"CPF", "cê pê efe", false},
-	{"CNPJ", "cê ene pê jota", false},
-	{"RG", "érre gê", false},
-	{"CNH", "cê ene agá", false},
-	{"CEP", "cép", false},
-	{"IRPF", "i érre pê efe", false},
-	{"IRPJ", "i érre pê jota", false},
-	{"INSS", "i ene ésse ésse", false},
-	{"FGTS", "éfe gê tê ésse", false},
-	{"CLT", "cê éle tê", false},
-	{"MEI", "mêi", false},
-	{"SUS", "sus", false},
-	{"IPTU", "i pê tê u", false},
-	{"IPVA", "i pê vê á", false},
-	{"LGPD", "éle gê pê dê", false},
-	{"PIX", "pics", true},
-	{"PJ", "pê jota", false},
-	{"PF", "pê efe", false},
-	{"EUA", "Estados Unidos", false},
-	{"ONG", "ôngue", false},
-	{"UTI", "u tê i", false},
-	// Health and training.
-	{"IMC", "i ême cê", false},
-	{"TMB", "tê ême bê", false},
-	{"RPE", "érre pê é", false},
-	{"RIR", "érre i érre", false},
-	// Technology.
-	{"PDF", "pê dê efe", false},
-	{"API", "á pê i", false},
-	{"URL", "u érre éle", false},
-	{"SMS", "ésse ême ésse", false},
-	{"USB", "u ésse bê", false},
-	{"GPS", "gê pê ésse", false},
-	{"CPU", "cê pê u", false},
-	{"TV", "tê vê", false},
-	{"OK", "ôquei", false},
-	{"WhatsApp", "uótsap", true},
-	{"Wi-Fi", "uái fai", true},
 }
 
 type lexiconRule struct {
@@ -83,12 +44,14 @@ type lexiconRule struct {
 	said string
 }
 
-// compileLexicon builds the rules for entries in the order they are given.
-// Entries that are empty or repeat an earlier Written are dropped, so the
-// first one wins.
+// compileLexicon builds the rules for entries. Entries that are empty or repeat
+// an earlier Written are dropped, so the first one wins (the application's
+// before the base dictionary's); the rules then run longest term first, so
+// "ALPR.sh" is found before "ALPR" and "Wi-Fi" before "Wi". An acronym that is
+// spelled letter by letter also matches its plural: "APIs" is "á pê ís".
 func compileLexicon(entries []LexiconEntry) []lexiconRule {
 	seen := map[string]bool{}
-	var rules []lexiconRule
+	var kept []LexiconEntry
 	for _, e := range entries {
 		key := e.Written
 		if e.AnyCase {
@@ -98,6 +61,19 @@ func compileLexicon(entries []LexiconEntry) []lexiconRule {
 			continue
 		}
 		seen[key] = true
+		kept = append(kept, e)
+	}
+	for _, e := range kept {
+		if !e.AnyCase && isAcronymWritten(e.Written) && saidAsLetters(e.Said) && !seen[e.Written+"s"] {
+			seen[e.Written+"s"] = true
+			kept = append(kept, LexiconEntry{Written: e.Written + "s", Said: e.Said + "s"})
+		}
+	}
+	sort.SliceStable(kept, func(i, j int) bool {
+		return utf8.RuneCountInString(kept[i].Written) > utf8.RuneCountInString(kept[j].Written)
+	})
+	rules := make([]lexiconRule, 0, len(kept))
+	for _, e := range kept {
 		pattern := regexp.QuoteMeta(e.Written)
 		if e.AnyCase {
 			pattern = "(?i)" + pattern
@@ -105,6 +81,54 @@ func compileLexicon(entries []LexiconEntry) []lexiconRule {
 		rules = append(rules, lexiconRule{regexp.MustCompile(pattern), e.Said})
 	}
 	return rules
+}
+
+// foldKey is a term as the index holds it: in lower case and without accents,
+// because an address is written without them ("corujao.ai") and the lexicon of
+// the application has the word as it is spelled ("Corujão").
+func foldKey(s string) string {
+	return strings.Map(func(r rune) rune { return foldAccent(unicode.ToLower(r)) }, s)
+}
+
+// lexiconIndex maps a term, in lower case and without accents, to how it is said,
+// the first entry winning. Domain names and the names in an e-mail look a label
+// up in it in any case ("alpr" in "alpr.sh" is "ALPR", "corujao" in
+// "ajuda@corujao.ai" is "Corujão").
+func lexiconIndex(entries []LexiconEntry) map[string]string {
+	index := map[string]string{}
+	for _, e := range entries {
+		key := foldKey(e.Written)
+		if _, ok := index[key]; e.Written != "" && !ok {
+			index[key] = e.Said
+		}
+	}
+	return index
+}
+
+// isAcronymWritten reports whether a term is two or more capitals and nothing else.
+func isAcronymWritten(written string) bool {
+	n := 0
+	for _, r := range written {
+		if !unicode.IsUpper(r) {
+			return false
+		}
+		n++
+	}
+	return n >= 2
+}
+
+// saidAsLetters reports whether a pronunciation is only names of letters.
+func saidAsLetters(said string) bool {
+	words := strings.Fields(said)
+	if len(words) < 2 {
+		return false
+	}
+	for _, w := range words {
+		if !letterNameSet[w] {
+			return false
+		}
+	}
+	return true
 }
 
 // apply replaces every whole-word match of the rule. Go's \b knows only ASCII
@@ -188,16 +212,35 @@ var units = map[string]unit{
 	"°":     {"grau", "graus", false},
 	"°c":    {"grau Celsius", "graus Celsius", false},
 	"°f":    {"grau Fahrenheit", "graus Fahrenheit", false},
+	"gb":    {"gigabyte", "gigabytes", false},
+	"mb":    {"megabyte", "megabytes", false},
+	"kb":    {"quilobyte", "quilobytes", false},
+	"tb":    {"terabyte", "terabytes", false},
+	"gbps":  {"gigabit por segundo", "gigabits por segundo", false},
+	"mbps":  {"megabit por segundo", "megabits por segundo", false},
+	"fps":   {"quadro por segundo", "quadros por segundo", false},
+	"hz":    {"hertz", "hertz", false},
+	"khz":   {"quilohertz", "quilohertz", false},
+	"mhz":   {"megahertz", "megahertz", false},
+	"ghz":   {"gigahertz", "gigahertz", false},
+	"kw":    {"quilowatt", "quilowatts", false},
+	"kwh":   {"quilowatt-hora", "quilowatts-hora", false},
+	"mah":   {"miliampère-hora", "miliampères-hora", false},
+	"V":     {"volt", "volts", false},
+	"W":     {"watt", "watts", false},
 }
 
 // unitPattern lists the units longest first. Those of more than one letter match
-// in any case ("KM", "Kg"); the single letters h, s, m, g, l and L only as
-// written.
-const unitPattern = `(?i:kg/m²|km/h|kcal|[°º][cf]|bpm|rpm|reps|rep|kg|km|cm|mm|ml|mg|min|seg|cal|m/s|m²|m³)|[hsmglL]|%|°`
+// in any case ("KM", "Kg", "GB"); the single letters h, s, m, g, l, L, V and W
+// only as written.
+const unitPattern = `(?i:kg/m²|km/h|kcal|[°º][cf]|bpm|rpm|reps|rep|kg|km|cm|mm|ml|mg|min|seg|cal|m/s|m²|m³|gbps|mbps|kwh|khz|mhz|ghz|mah|fps|gb|mb|kb|tb|kw|hz)|[hsmglLVW]|%|°`
 
 // lookupUnit finds a unit as it was written.
 func lookupUnit(written string) (unit, bool) {
 	key := strings.ToLower(strings.ReplaceAll(written, "º", "°"))
+	if written == "V" || written == "W" {
+		return units[written], true
+	}
 	if len([]rune(written)) == 1 && written != "L" && written != strings.ToLower(written) {
 		return unit{}, false
 	}
