@@ -10,6 +10,23 @@ a release is corrected by another release and never by moving a tag.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-26
+
+### Added
+
+- The **Kokoro engine**, inside this package: [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) (Apache-2.0) for the voices Piper does not have. `Config.Kokoro` (`KokoroConfig`: `ProgramPath`, `ModelPath`, `VoicesPath`, `Voices`, `Threads` (default 2, at most 16), `Env`) turns it on; the zero value leaves the client with Piper only, as before. A voice belongs to an engine and the voice a call names decides which one speaks, so one client holds Piper voices and Kokoro voices together (`Voice.Engine`, `EnginePiper`, `EngineKokoro`).
+- The voices `VoiceDora` (`pf_dora`, female), `VoiceAlex` (`pm_alex`) and `VoiceSanta` (`pm_santa`), `KokoroVoices`, and `ParseVoice` reading `dora`, `alex`, `santa` and the Kokoro names.
+- `docs/kokoro-speak.py`, the program the Kokoro voices run: the text on standard input (never in an argument), a mono 24 kHz WAV out, `kokoro-onnx` 0.6.1 (MIT) as the runtime, the threads of onnxruntime set from `--threads`, onnxruntime telemetry off, and an error line that never carries the text. `docs/kokoro-requirements.txt` pins its packages by sha256 and `docs/Dockerfile.kokoro.snippet` builds an image with them and the model (checked by sha256); it was built, and `TestRealKokoro` was run inside it as a non-root user with two CPUs, on arm64.
+- The same guarantees as the Piper path: a missing program, model, voices file or voice fails at boot (`New` opens the voices file and checks every voice is in it), no inherited environment, a private directory per call, the timeout kills the process, the text limit is checked first, and errors never carry the text. `Config.LengthScale` (the pace is `1/LengthScale`) and `Config.SentenceSilence` apply to the Kokoro voices; `NoiseScale` and `NoiseW` are Piper's. A Kokoro key hashes the voice, the model's size and the voices file, the pace, the pause, the format and the text, and nothing else.
+- `Handler` answers a `GET` with a valid token on its path with `{"voices": [...], "default": "..."}`, when its `Speaker` is a `VoiceLister` (a `*Client` is; a `Fake` and a `Cache` are not and answer `{}`). Without a token the answer is the 405 it always was.
+- `Remote.Voices(ctx)` reads the voices of every node, in parallel, and remembers them for `RemoteConfig.VoiceTTL` (default `DefaultVoiceTTL`, 5 minutes): a call for a voice goes only to the nodes that serve it. `NodeVoices` is what it reports.
+- `TestRealKokoro`, behind `KOKORO_BIN`, `KOKORO_MODEL` and `KOKORO_VOICES` (and `KOKORO_ENV`, `KOKORO_FFMPEG`, `KOKORO_SAMPLES`).
+
+### Changed
+
+- `Remote` no longer returns at the first node that answers `unknown_voice`: nodes may serve different voices, so it asks the next node, remembers the refusal for `VoiceTTL`, and fails with `ErrUnknownVoice` only when no node serves the voice, naming each node in the message. A node that is down while the others refuse makes the error `ErrNoNodes`, since the voice may be on that node. With identical nodes (the case until now) a wrong voice costs one request to each node, once per `VoiceTTL`.
+- `Config.BinaryPath` and `Config.Voices` are not required when `Config.Kokoro` is set and neither of them is: the client then speaks with Kokoro only. Any other configuration is checked exactly as before, and a Kokoro voice in `Config.Voices` is refused with the reason.
+
 ## [0.3.2] - 2026-11-25
 
 ### Fixed

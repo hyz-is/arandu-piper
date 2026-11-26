@@ -7,12 +7,17 @@
 Text to speech on your own server. A reply goes in, a voice note comes out, and
 nothing leaves the machine: it runs [Piper](https://github.com/OHF-Voice/piper1-gpl),
 a fast neural text-to-speech engine that works on a CPU, so there is no
-per-minute cost and no text sent to a third party. It is the counterpart of
+per-minute cost and no text sent to a third party. Since 0.4.0 it also runs
+[Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M), a second engine with a
+female Brazilian voice (`piper.VoiceDora`) and two male ones, in the same client:
+a voice belongs to an engine, and the voice a call names decides which one
+speaks. It is the counterpart of
 [`arandu-whisper`](https://github.com/hyz-is/arandu-whisper), which turns speech
 into text.
 
-It is a thin layer over a program you install. `piper` makes a WAV from the text
-it reads on its standard input; `ffmpeg`, optionally, turns that WAV into the
+It is a thin layer over a program you install. `piper` (or, for the Kokoro
+voices, `kokoro-speak`, a small program in `docs/`) makes a WAV from the text it
+reads on its standard input; `ffmpeg`, optionally, turns that WAV into the
 mono 16 kHz Ogg Opus that WhatsApp plays as a voice note. This package adds what
 an application otherwise writes every time:
 
@@ -26,7 +31,8 @@ an application otherwise writes every time:
 - `Plain`, which removes the formatting of WhatsApp and Markdown and the emojis
   from a message, so a voice does not read "asterisk" aloud;
 - several voices in one client, named by a type (`piper.VoiceFaber`,
-  `piper.VoiceCadu`), with a default one and a choice per call;
+  `piper.VoiceCadu`, and the Kokoro ones `piper.VoiceDora`, `piper.VoiceAlex`,
+  `piper.VoiceSanta`), with a default one and a choice per call;
 - `Key` and `Cache`, so an audio already made for the same words is reused
   instead of made again;
 - the `Speaker` interface, with a `Fake`, so the code that speaks is tested
@@ -34,15 +40,16 @@ an application otherwise writes every time:
 
 It owns no table, no route and no policy, and it does not import the framework:
 an application on any framework version installs it. It has no third-party
-dependency. It executes Piper and does not link it, so Piper's license (below)
-applies to Piper, which you install, and not to this package.
+dependency. It executes Piper and Kokoro and does not link them, so their
+licenses (below) apply to the programs you install, and not to this package.
 
 ## Requirements
 
 | what | notes |
 | --- | --- |
-| Piper | the `piper` program of the `piper-tts` package, 1.5 or later, with Python 3.9 or later |
+| Piper | the `piper` program of the `piper-tts` package, 1.5 or later, with Python 3.9 or later; only for the Piper voices |
 | one or more voices | an `.onnx` file and its `.onnx.json` each; see **Choose a voice** before taking one |
+| Kokoro | only for the Kokoro voices: `docs/kokoro-speak.py`, Python 3.10 to 3.13 with the packages of `docs/kokoro-requirements.txt`, the model and the voices file; see **Kokoro voices** |
 | ffmpeg | only for `FormatOpus`, built with libopus (the common static builds are) |
 
 ## Install
@@ -131,6 +138,120 @@ curl -fLO $BASE/pt_BR-faber-medium.onnx.json
 curl -fLO $BASE/MODEL_CARD
 echo "75e913eb463db0b6ac7ddf68d3e4c9ac19ace36dc3b710a81039b448352b8ffc  pt_BR-faber-medium.onnx" | sha256sum -c -
 ```
+
+## Kokoro voices
+
+[Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) is a second engine, for
+a voice Piper does not have: a female Brazilian Portuguese one. A voice belongs
+to one engine, by its name, and a client holds voices of both:
+
+| voice | engine | |
+| --- | --- | --- |
+| `piper.VoiceDora` (`pf_dora`) | Kokoro | female |
+| `piper.VoiceAlex` (`pm_alex`) | Kokoro | male |
+| `piper.VoiceSanta` (`pm_santa`) | Kokoro | male |
+| `piper.VoiceFaber`, `piper.VoiceCadu`, any catalogue name | Piper | male |
+
+`ParseVoice` reads `dora`, `alex` and `santa` (and `pf_dora`...) from
+configuration, as it reads `faber` and `cadu`. `voice.Engine()` says which engine
+speaks a voice.
+
+**How it runs.** Like Piper: a program installed on the host or in the image,
+started as a child process with no shell, no inherited environment, the text on
+standard input, a private directory per call, the timeout killing it, and the same
+limits and errors that never carry what was said. The program is
+[`docs/kokoro-speak.py`](docs/kokoro-speak.py), about 100 lines, which reads the
+text from standard input, runs the model through
+[kokoro-onnx](https://github.com/thewh1teagle/kokoro-onnx) and writes a mono
+24 kHz WAV; `ffmpeg` then makes the Opus note as for Piper. The WAV goes back
+through the same reader, so `Audio.Duration` is exact.
+
+**Why that runtime.** The choice was made by running the sentence of the next
+section through each candidate and transcribing it back with whisper.cpp:
+
+- `kokoro-onnx` 0.6.1 (MIT): reads Portuguese correctly through espeak-ng
+  (`pt-br`), is the reference implementation of Kokoro's tokenizer, puts the
+  pauses between sentences itself, and lets this package set the threads of
+  onnxruntime directly. Chosen.
+- `sherpa-onnx` (Apache-2.0), whose `sherpa-onnx-offline-tts` is a ready binary:
+  it takes the text as an **argument**, which would show every message in the
+  process list and break this package's rule, and its 2.x releases no longer send
+  Portuguese through espeak-ng (the words come out "OOV word skipped" and the
+  audio is a third of the length). 1.13.8 and earlier work, but a program pinned
+  to a release before a regression is the worse choice of the two.
+
+**What it asks of the machine.** Python 3.10 to 3.13 and the packages of
+`docs/kokoro-requirements.txt`, pinned by sha256 (kokoro-onnx, onnxruntime, numpy
+and the espeak-ng library and data in the `espeakng-loader` wheel), plus two
+files from the `model-files-v1.0` release of kokoro-onnx, which are
+Kokoro-82M v1.0 converted to ONNX:
+
+| file | size | sha256 |
+| --- | --- | --- |
+| `kokoro-v1.0.onnx` (fp32, the reference) | 326 MB | `7d5df8ecf7d4b1878015a32686053fd0eebe2bc377234608764cc0ef3636a6c5` |
+| `kokoro-v1.0.int8.onnx` (int8) | 92 MB | `6e742170d309016e5891a994e1ce1559c702a2ccd0075e67ef7157974f6406cb` |
+| `voices-v1.0.bin` | 28 MB | `bca610b8308e8d99f32e6fe4197e7ec01679264efed0cac9140fe9c29f1fbf7d` |
+
+```bash
+python3 -m venv /opt/kokoro-venv
+/opt/kokoro-venv/bin/pip install --require-hashes --no-deps -r docs/kokoro-requirements.txt
+# the program: docs/kokoro-speak.py with its first line set to #!/opt/kokoro-venv/bin/python
+sed '1s|.*|#!/opt/kokoro-venv/bin/python|' docs/kokoro-speak.py > /opt/kokoro-venv/bin/kokoro-speak
+chmod 0755 /opt/kokoro-venv/bin/kokoro-speak
+```
+
+In an image, `docs/Dockerfile.kokoro.snippet` does it with `pip --target`, on
+the same `distroless/python3-debian12` as Piper, so one image can hold both.
+
+**Speed and memory, measured** (the sentence of 8 seconds below, mono Opus note,
+two threads; Apple M4 Max for the first column, the module's real test inside the
+distroless image with `--cpus 2`, arm64, for the second):
+
+| | this Mac | the image |
+| --- | --- | --- |
+| Kokoro fp32 | 2.9 s | 3.3 s |
+| Kokoro int8 | 1.5 s | not measured |
+| Piper `faber` | 0.4 s | not measured |
+
+Kokoro is about seven times slower than Piper on the same machine, and each call
+loads the model again and holds it while it speaks: the peak memory of one call
+measured 690 MB with the fp32 model and 460 MB with int8, so a handler with
+`MaxConcurrent` 2 needs about 1.4 GB. It suits a voice note after a reply, from a
+job, not a call that waits on the line. Set `Timeout` from a measured run on the
+server (a Xeon E5-2667 v4 is slower than an M4). The int8 model halves the time
+and takes a third less memory; **listen to it before choosing it**.
+
+The pt-BR voices have the thinnest training data of Kokoro's catalogue (the
+model's `VOICES.md` gives them no grade). Transcribed back with whisper.cpp
+`small`, the sample sentence came back whole from `pm_alex`, from `pf_dora` (with
+"polichinellos", a spelling of the same word) and from the int8 `pf_dora`, and
+`pm_santa` turned "dez polichinelos" into "despole chinelos". That measures how
+clear a voice is, not how pleasant it sounds: listen to each with the person who
+will hear it.
+
+```go
+c, err := piper.New(piper.Config{
+    Kokoro: piper.KokoroConfig{
+        ProgramPath: cfg.Kokoro.Bin,    // KOKORO_BIN, e.g. /opt/kokoro/bin/kokoro-speak
+        ModelPath:   cfg.Kokoro.Model,  // KOKORO_MODEL
+        VoicesPath:  cfg.Kokoro.Voices, // KOKORO_VOICES
+        // Voices:   []piper.Voice{piper.VoiceDora}, // default: all three
+        // Threads:  2,                               // default 2, at most 16
+        Env: []string{"PYTHONPATH=" + cfg.Kokoro.PythonPath}, // when installed with pip --target
+    },
+    DefaultVoice: piper.VoiceDora,
+    Format:       piper.FormatOpus,
+})
+```
+
+With `Kokoro` set and no `BinaryPath` or `Voices`, the client speaks with Kokoro
+only. With both, it holds the Piper voices and the Kokoro ones, and
+`SpeakAs(ctx, piper.VoiceDora, text)` and `SpeakAs(ctx, piper.VoiceCadu, text)` go
+to different programs. `New` refuses, at boot, a missing program, model or voices
+file, a voices file that is not Kokoro's, a voice that is not in it, and a
+`Threads` out of range. `LengthScale` (the pace is `1/LengthScale`) and
+`SentenceSilence` apply to the Kokoro voices; `NoiseScale` and `NoiseW` are
+Piper's and do not reach Kokoro, nor do they change a Kokoro key.
 
 ## Wire it
 
@@ -336,9 +457,22 @@ Calls go to the nodes in turn. A node that is busy (429), unreachable, timed out
 or failing is skipped at once and the next one is tried; after
 `FailureThreshold` failures in a row (3) it leaves the rotation for `Cooldown`
 (30 s), and when every node is out they are all tried as a last resort. A refusal
-another node would repeat (empty or too long text, an unknown voice, a wrong
-token) is returned as it is, as the same `errors.Is` sentinel the local client
-returns. When every node answers 429 the round is repeated for up to `BusyWait` (5 s) before the call fails. `Remote.Key` has no network: it hashes the voice, the cleaned text and
+another node would repeat (empty or too long text, a wrong token) is returned as
+it is, as the same `errors.Is` sentinel the local client returns.
+
+**Nodes may serve different voices** (a node with Kokoro, a node with Piper
+only). A node advertises its voices: `GET` on the handler's path with a valid
+token answers `{"voices": ["pf_dora", ...], "default": "..."}` when its `Speaker`
+is a `VoiceLister` (a `*Client` is). `Remote.Voices(ctx)` reads them from every
+node, in parallel, and remembers them for `VoiceTTL` (5 minutes); call it at boot
+and to refresh. A call for a voice then goes only to the nodes that serve it.
+Without that list (an older node, or `Voices` not called) the node is asked in the
+call, and when it answers `unknown_voice` the next node is tried and the refusal
+is remembered for `VoiceTTL`. When no node serves the voice the call fails at once
+with `ErrUnknownVoice` and a message naming each node ("no node serves the voice
+"pf_dora" (n1 serves pt_BR-cadu-medium; n2 refused it)"), which is the fix:
+install the engine on a node, or choose another voice. A node that is down, and
+could be the one with the voice, makes it `ErrNoNodes` instead. When every node answers 429 the round is repeated for up to `BusyWait` (5 s) before the call fails. `Remote.Key` has no network: it hashes the voice, the cleaned text and
 `KeyTag`, which you change when the nodes' voices or settings change.
 `Remote.Health(ctx)` asks every node's `/_arandu/health`.
 
@@ -350,9 +484,10 @@ The onnxruntime of the `piper-tts` wheel starts one thread per core it sees. On 
 
 | field | default | |
 | --- | --- | --- |
-| `BinaryPath` | required | `piper`: a path, or a bare name looked up in PATH |
-| `Voices` | required, at least one | `map[piper.Voice]piper.VoiceFiles`; `piper.VoicesIn(dir, voices...)` builds it |
-| `DefaultVoice` | the only voice | required when `Voices` holds more than one; the voice of `Speak` |
+| `BinaryPath` | required, unless Kokoro only | `piper`: a path, or a bare name looked up in PATH |
+| `Voices` | required (at least one), unless Kokoro only | the Piper voices: `map[piper.Voice]piper.VoiceFiles`; `piper.VoicesIn(dir, voices...)` builds it |
+| `Kokoro` | off | `piper.KokoroConfig`, below; turns the Kokoro voices on |
+| `DefaultVoice` | the only voice | required when the client holds more than one voice (of either engine); the voice of `Speak` |
 
 Each `VoiceFiles`:
 
@@ -362,7 +497,19 @@ Each `VoiceFiles`:
 | `ConfigPath` | `ModelPath` + `.json` | must be JSON; its `num_speakers` is checked against `SpeakerID` |
 | `SpeakerID` | 0 | the speaker of a multi-speaker voice |
 
-The rest of `Config` applies to every voice:
+Each `KokoroConfig` (all zero means off; a part set without the others is refused):
+
+| field | default | |
+| --- | --- | --- |
+| `ProgramPath` | required | `kokoro-speak`: `docs/kokoro-speak.py` with its first line set to the interpreter |
+| `ModelPath` | required | `kokoro-v1.0.onnx` (or the int8 one) |
+| `VoicesPath` | required | `voices-v1.0.bin`; every voice served must be in it |
+| `Voices` | `KokoroVoices()` | which Kokoro voices to serve |
+| `Threads` | 2 | onnxruntime's threads for one call, 1 to 16 |
+| `Env` | none | extra `KEY=VALUE`, after `Config.Env`: `PYTHONPATH=/opt/kokoro` |
+
+The rest of `Config` applies to every voice (`NoiseScale` and `NoiseW` to the
+Piper ones only):
 
 | field | default | |
 | --- | --- | --- |
@@ -517,9 +664,46 @@ the configuration at it: `PIPER_BIN=/opt/piper/bin/piper`,
 as `:nonroot` does; Piper writes only to the call's private directory, so
 `/tmp` must be writable or `TempDir` must point somewhere that is.
 
+## Kokoro in the image
+
+`docs/Dockerfile.kokoro.snippet` is the Kokoro counterpart of the Piper snippet
+above: a build stage installs the packages with `--require-hashes`, fetches the
+model and the voices file and checks their sha256, writes `kokoro-speak` with the
+interpreter of the runtime image on its first line, and the runtime stage
+(`gcr.io/distroless/python3-debian12:nonroot`) only copies the result. What the
+application gets:
+
+```dockerfile
+ENV KOKORO_BIN=/opt/kokoro/bin/kokoro-speak \
+    KOKORO_MODEL=/opt/kokoro/model/kokoro.onnx \
+    KOKORO_VOICES=/opt/kokoro/model/voices-v1.0.bin \
+    KOKORO_PYTHONPATH=/opt/kokoro
+```
+
+and `Kokoro.Env: []string{"PYTHONPATH=/opt/kokoro"}` in the configuration. To
+serve Piper and Kokoro from one image, put both build stages in it and both sets
+of `COPY` lines (the paths do not overlap: `/opt/piper`, `/opt/voices`,
+`/opt/kokoro`). `--build-arg KOKORO_MODEL=kokoro-v1.0.int8.onnx` builds with the
+int8 model. The image is 1 GB with the fp32 model. It was built, and the
+module's `TestRealKokoro` was run inside it as a non-root user with two CPUs, on
+arm64; the amd64 packages are the ones PyPI publishes for Python 3.11, with the
+hashes of `kokoro-requirements.txt`.
+
 ## Licenses
 
 - This package: MIT, see [LICENSE.md](LICENSE.md).
+- Kokoro: the weights of Kokoro-82M are **Apache-2.0**
+  ([hexgrad/Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M)), and so are
+  the voices (`pf_dora`, `pm_alex`, `pm_santa`). `kokoro-onnx`, which runs them,
+  is MIT, as are onnxruntime and espeakng-loader; numpy, joblib, cloudpickle and
+  protobuf are BSD, flatbuffers Apache-2.0. The two GPL-3.0 parts are the ones
+  Piper already brings: espeak-ng (the library and the data in `espeakng-loader`)
+  and `phonemizer`. They are run by this package, never linked into it, so the
+  rule is Piper's: an image you distribute makes you a distributor of GPL
+  software, so keep their license texts with it (the snippet copies them to
+  `/usr/share/licenses/kokoro`) and be ready to provide the source, which is
+  public; a service you only run does not distribute it. Keep the Apache-2.0
+  notice of Kokoro-82M with the model.
 - Piper (`piper-tts`): GPL-3.0-or-later. Running it as a separate program does not
   make this package or your application GPL. Putting it in an image you
   distribute makes you a distributor of GPL software: keep its license text with
@@ -548,6 +732,20 @@ PIPER_FFMPEG=/usr/bin/ffmpeg PIPER_SAMPLES=/tmp/samples \
 It speaks one sentence, checks the WAV, makes Opus notes at the voice's pace and
 slower, and keeps all of them in `PIPER_SAMPLES` for listening. Without the
 variables it skips and says why.
+
+The Kokoro voices have their own, which runs the real program and model:
+
+```bash
+KOKORO_BIN=/opt/kokoro/bin/kokoro-speak KOKORO_MODEL=/opt/kokoro/model/kokoro.onnx \
+KOKORO_VOICES=/opt/kokoro/model/voices-v1.0.bin KOKORO_ENV=PYTHONPATH=/opt/kokoro \
+KOKORO_FFMPEG=/usr/bin/ffmpeg KOKORO_SAMPLES=/tmp/samples \
+  go test -run TestRealKokoro -v ./tests/Unit
+```
+
+It speaks a sentence with each Kokoro voice, checks the WAV and the length,
+makes an Opus note, and keeps them in `KOKORO_SAMPLES`. `KOKORO_ENV` is a
+comma-separated list of `KEY=VALUE`, needed for a `pip --target` install. Without
+the variables it skips and says why.
 
 ## License
 
