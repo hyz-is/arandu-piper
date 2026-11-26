@@ -35,6 +35,9 @@ const (
 	// DefaultBusyWait is how long a call keeps trying when every node answered
 	// busy.
 	DefaultBusyWait = 5 * time.Second
+	// DefaultVoiceTTL is how long Remote remembers that a node does not serve a
+	// voice, or which voices a node listed, before it asks again.
+	DefaultVoiceTTL = 5 * time.Minute
 	// busyBackoff is the first pause between two rounds over busy nodes; it
 	// doubles up to maxBusyBackoff.
 	busyBackoff    = 200 * time.Millisecond
@@ -43,6 +46,10 @@ const (
 
 // errNodeBusy marks a node's 429: it is working at its limit, not unwell.
 var errNodeBusy = errors.New("busy")
+
+// errNodeNoVoice marks a node's refusal of a voice: it is well, it does not
+// have that voice, and another node may.
+var errNodeNoVoice = errors.New("does not serve the voice")
 
 // maxRemoteAudio bounds the audio read back from a node.
 const maxRemoteAudio = maxOutputBytes
@@ -110,6 +117,11 @@ type RemoteConfig struct {
 	// instead of failing. Zero means DefaultBusyWait; a negative value turns the
 	// wait off and a call fails as soon as one round found every node busy.
 	BusyWait time.Duration
+	// VoiceTTL is how long a node's refusal of a voice, or the list of voices
+	// it gave to Voices, is trusted before the node is asked again: nodes may
+	// serve different voices, and one that is upgraded to serve a new voice is
+	// found again after this time. Zero means DefaultVoiceTTL.
+	VoiceTTL time.Duration
 	// KeyTag is part of every Key. The audio depends on settings only the
 	// nodes know (the voice files, the pace, the format), so change the tag
 	// when they change and a Cache stops answering with the old audio. Empty
@@ -134,6 +146,7 @@ type Remote struct {
 	maxChars   int
 	keyTag     string
 	busyWait   time.Duration
+	voiceTTL   time.Duration
 	http       *http.Client
 	next       atomic.Uint64
 	now        func() time.Time
@@ -146,6 +159,12 @@ type remoteNode struct {
 	failures  int
 	downUntil time.Time
 	lastErr   string
+	// catalog is what the node listed to Voices, nil while it is not known, and
+	// trusted until catalogUntil. refused holds the voices the node answered
+	// unknown_voice to, until when.
+	catalog      map[Voice]bool
+	catalogUntil time.Time
+	refused      map[Voice]time.Time
 }
 
 var (
@@ -161,7 +180,7 @@ func NewRemote(cfg RemoteConfig) (*Remote, error) {
 	if len(cfg.Token) < MinTokenLength {
 		return nil, fmt.Errorf("piper: RemoteConfig.Token is shorter than %d characters", MinTokenLength)
 	}
-	if cfg.Timeout < 0 || cfg.FailureThreshold < 0 || cfg.Cooldown < 0 || cfg.MaxChars < 0 {
+	if cfg.Timeout < 0 || cfg.FailureThreshold < 0 || cfg.Cooldown < 0 || cfg.MaxChars < 0 || cfg.VoiceTTL < 0 {
 		return nil, errors.New("piper: RemoteConfig limits must not be negative")
 	}
 	r := &Remote{
@@ -174,6 +193,7 @@ func NewRemote(cfg RemoteConfig) (*Remote, error) {
 		maxChars:   cfg.MaxChars,
 		keyTag:     cfg.KeyTag,
 		busyWait:   cfg.BusyWait,
+		voiceTTL:   cfg.VoiceTTL,
 		http:       cfg.HTTPClient,
 		now:        time.Now,
 	}
@@ -211,6 +231,9 @@ func NewRemote(cfg RemoteConfig) (*Remote, error) {
 	if r.busyWait == 0 {
 		r.busyWait = DefaultBusyWait
 	}
+	if r.voiceTTL == 0 {
+		r.voiceTTL = DefaultVoiceTTL
+	}
 	if r.http == nil {
 		r.http = &http.Client{Transport: &http.Transport{
 			MaxIdleConnsPerHost: 4,
@@ -245,10 +268,13 @@ func (r *Remote) Speak(ctx context.Context, text string) (Audio, error) {
 // SpeakAs sends the text to the next healthy node. A node that is busy,
 // unreachable, timed out or failing is skipped for this call and, after
 // FailureThreshold failures in a row, for Cooldown; the next node is tried at
-// once, and when every node was busy the round is repeated for up to BusyWait. A refusal another node would repeat (empty or too long text, an
-// unknown voice) is returned as the same sentinel error the local client
-// gives. When every node failed the error wraps ErrNoNodes and the last node's
-// error.
+// once, and when every node was busy the round is repeated for up to BusyWait.
+// A refusal another node would repeat (empty or too long text) is returned as
+// the same sentinel error the local client gives. Nodes may serve different
+// voices: a node that does not have the voice is skipped (and remembered for
+// VoiceTTL, or known from Voices), and when no node has it the error is
+// ErrUnknownVoice, naming the nodes. When every node failed the error wraps
+// ErrNoNodes and the last node's error.
 func (r *Remote) SpeakAs(ctx context.Context, voice Voice, text string) (Audio, error) {
 	spoken := normalize(text)
 	if !speakable(spoken) {
@@ -270,18 +296,30 @@ func (r *Remote) SpeakAs(ctx context.Context, voice Voice, text string) (Audio, 
 			if err := ctx.Err(); err != nil {
 				return Audio{}, err
 			}
+			if voice != "" && !n.mayServe(voice, r.now()) {
+				continue
+			}
 			audio, retry, err := r.call(ctx, n, body)
 			if err == nil {
-				n.succeed()
+				n.succeed(voice)
 				return audio, nil
 			}
 			if !retry {
 				return Audio{}, err
 			}
+			if errors.Is(err, errNodeNoVoice) {
+				// Not a failure: the node is well and another may have the voice.
+				n.refuse(voice, r.now().Add(r.voiceTTL))
+				continue
+			}
 			if errors.Is(err, errNodeBusy) {
 				anyBusy = true
 			}
 			last = err
+		}
+		if last == nil {
+			// No node failed and none was busy: each one does not have the voice.
+			return Audio{}, r.noNodeServes(voice)
 		}
 		// A round in which some node was busy is worth another, whatever the
 		// others did: a busy node frees, while a node that failed was already
@@ -338,9 +376,34 @@ func (n *remoteNode) isDown(now time.Time) bool {
 	return now.Before(n.downUntil)
 }
 
-func (n *remoteNode) succeed() {
+func (n *remoteNode) succeed(voice Voice) {
 	n.mu.Lock()
 	n.failures, n.downUntil, n.lastErr = 0, time.Time{}, ""
+	delete(n.refused, voice)
+	n.mu.Unlock()
+}
+
+// mayServe is false when the node is known not to have the voice: it refused it
+// not long ago, or it listed its voices (not long ago) and the voice is not
+// among them. A node that said nothing is assumed to have it, and is asked.
+func (n *remoteNode) mayServe(voice Voice, now time.Time) bool {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if until, ok := n.refused[voice]; ok && now.Before(until) {
+		return false
+	}
+	if n.catalog != nil && now.Before(n.catalogUntil) && !n.catalog[voice] {
+		return false
+	}
+	return true
+}
+
+func (n *remoteNode) refuse(voice Voice, until time.Time) {
+	n.mu.Lock()
+	if n.refused == nil {
+		n.refused = map[Voice]time.Time{}
+	}
+	n.refused[voice] = until
 	n.mu.Unlock()
 }
 
@@ -399,7 +462,8 @@ func (r *Remote) call(ctx context.Context, n *remoteNode, body []byte) (Audio, b
 	case codeTextTooLong, codeTooLarge:
 		return Audio{}, false, fmt.Errorf("%w: refused by node %s", ErrTextTooLong, n.Name)
 	case codeUnknownVoc:
-		return Audio{}, false, fmt.Errorf("%w: refused by node %s", ErrUnknownVoice, n.Name)
+		// Not final: another node may have the voice. SpeakAs says so when none does.
+		return Audio{}, true, fmt.Errorf("piper: node %s %w", n.Name, errNodeNoVoice)
 	case codeBadRequest:
 		return Audio{}, false, fmt.Errorf("piper: node %s refused the request", n.Name)
 	case codeUnauth:
@@ -479,4 +543,108 @@ func (r *Remote) Health(ctx context.Context) []NodeHealth {
 	}
 	wg.Wait()
 	return out
+}
+
+// noNodeServes is the answer when every node refused the voice, or is known not
+// to have it: ErrUnknownVoice, with what each node said, so the fix (install the
+// engine on a node, or name another voice) is plain.
+func (r *Remote) noNodeServes(voice Voice) error {
+	now := r.now()
+	var parts []string
+	for _, n := range r.nodes {
+		n.mu.Lock()
+		switch {
+		case n.catalog != nil && now.Before(n.catalogUntil):
+			var have []string
+			for _, v := range sortedVoices(n.catalog) {
+				have = append(have, string(v))
+			}
+			parts = append(parts, fmt.Sprintf("%s serves %s", n.Name, strings.Join(have, ", ")))
+		default:
+			parts = append(parts, fmt.Sprintf("%s refused it", n.Name))
+		}
+		n.mu.Unlock()
+	}
+	if voice == "" {
+		return fmt.Errorf("%w: no node has a default voice (%s)", ErrUnknownVoice, strings.Join(parts, "; "))
+	}
+	return fmt.Errorf("%w: no node serves the voice %q (%s)", ErrUnknownVoice, voice, strings.Join(parts, "; "))
+}
+
+// NodeVoices is what Remote.Voices reports for one node.
+type NodeVoices struct {
+	// Name and URL are the node's, as configured.
+	Name, URL string
+	// OK is true when the node listed its voices just now.
+	OK bool
+	// Voices are the voices the node serves, and Default the one it uses when
+	// a call names none. Empty when OK is false.
+	Voices  []Voice
+	Default Voice
+	// Error is a short reason when OK is false: an older node that does not
+	// list its voices is still used, and asked for the voice in each call.
+	Error string
+}
+
+// Voices asks every node which voices it serves, in parallel, and remembers the
+// answers for VoiceTTL: a call for a voice then goes only to the nodes that
+// serve it, and a voice no node serves is refused at once, naming the nodes.
+// Call it at boot, and again to refresh. A node that cannot answer (a node of an
+// older version, an unreachable one) is not wrong and not taken out of the
+// rotation: it is asked for the voice in the call itself.
+func (r *Remote) Voices(ctx context.Context) []NodeVoices {
+	out := make([]NodeVoices, len(r.nodes))
+	var wg sync.WaitGroup
+	for i, n := range r.nodes {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			out[i] = r.listVoices(ctx, n)
+		}()
+	}
+	wg.Wait()
+	return out
+}
+
+func (r *Remote) listVoices(ctx context.Context, n *remoteNode) NodeVoices {
+	res := NodeVoices{Name: n.Name, URL: n.URL}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, n.URL+r.path, nil)
+	if err != nil {
+		res.Error = "the request could not be built"
+		return res
+	}
+	req.Header.Set("Authorization", "Bearer "+r.token)
+	resp, err := r.http.Do(req)
+	if err != nil {
+		res.Error = "unreachable"
+		return res
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
+	switch {
+	case resp.StatusCode == http.StatusUnauthorized:
+		res.Error = "the token was refused"
+		return res
+	case resp.StatusCode != http.StatusOK:
+		res.Error = fmt.Sprintf("the node does not list its voices (status %d)", resp.StatusCode)
+		return res
+	}
+	var got wireVoices
+	if json.Unmarshal(raw, &got) != nil || len(got.Voices) == 0 {
+		res.Error = "the node did not say which voices it serves"
+		return res
+	}
+	catalog := make(map[Voice]bool, len(got.Voices))
+	for _, v := range got.Voices {
+		res.Voices = append(res.Voices, Voice(v))
+		catalog[Voice(v)] = true
+	}
+	res.Default = Voice(got.Default)
+	res.OK = true
+	n.mu.Lock()
+	n.catalog, n.catalogUntil = catalog, r.now().Add(r.voiceTTL)
+	n.mu.Unlock()
+	return res
 }
