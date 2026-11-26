@@ -4,7 +4,7 @@
 
 ## 0.6.0
 
-No exported name was removed or changed: `apidiff` against 0.5.0 shows only additions (`LetterName`, `SpellAcronym`, `ReadsAsWord`, `ParseLexicon`, `LexiconJSON`, `LexiconVersion`, `Validate`, `Normalizer.Validate`, `Normalizer.Check`, `Issue`, `IssueKind`, `Severity` and their constants, `HasErrors`). What changes is what a `*Client` says, on purpose, and `NormalizerVersion`.
+No exported name was removed or changed: `apidiff` against 0.5.0 shows additions (`LetterName`, `SpellAcronym`, `ReadsAsWord`, `ParseLexicon`, `LexiconJSON`, `LexiconVersion`, `Validate`, `Normalizer.Validate`, `Normalizer.Check`, `Issue`, `IssueKind`, `Severity` and their constants, `HasErrors`) and one change of value, which it reports as incompatible: the constant `NormalizerVersion` moves with the rules, on purpose. What changes besides is what a `*Client` says, on purpose.
 
 - **`NormalizerVersion` is `"ptbr-2.lex1"`** (it was `"ptbr-1"`). It is a constant string: a comparison with the old value, or a cache key that was built with it, moves with it. Put it in `RemoteConfig.KeyTag` as before.
 - **Cache keys change** for any text with an acronym, a domain, an e-mail, an identifier (plate, IP, version, protocol), a range of hours, `24/7`, `D+1`, a unit of data, a foreign word of the dictionary, `§` or `#`. The audio stored under the old keys is not wrong, it is the 0.5.0 speech, and a `Cache` makes it again on the first call. Nothing to migrate; a text of words and plain numbers keeps its key.
