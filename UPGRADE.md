@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 0.5.0
+
+No exported name was removed or changed: `apidiff` against 0.4.0 shows only additions. What changes is what a `*Client` says, on purpose.
+
+- **A `*Client` now makes the text speakable before speaking it** (`Speakable`: numbers, money, dates, times, units and symbols in words, formatting and emoji removed, each line a sentence). A text such as `"Próximo treino: supino 3x10 às 06:30."` was read by espeak-ng as it could; now it is read as `"... supino três séries de dez às seis e meia."`. This is the right thing for every text a person typed; to keep the old behaviour of a client, set `Config.Speech.Raw: true`.
+- **Cache keys.** `Key` hashes the text that is spoken, so a key changes only when what is said changes, and for these texts it does: any text with a digit, a symbol, a mark of formatting, an emoji, a list or a line that did not end in a mark, and any text that the lexicon touches. A text of plain words that already ends in `.`, `!` or `?` keeps its key. The audio stored under the old keys is not wrong, it is the old speech, and a `Cache` simply makes it again on the first call. Nothing to migrate; if you want the old audio kept, set `Raw`.
+- **A `Remote` does not normalize**: the node it calls does, and `Remote.Key` hashes the text it was given. After a node is upgraded the same text is spoken differently under the same key. Put the version in the key: `RemoteConfig{KeyTag: piper.NormalizerVersion}` (or `client.NormalizerVersion()` of a local client with the same `Speech`), and the first calls after the upgrade make the audio again.
+- `MaxChars` still counts the text as given, before the rules run. The spoken text may be up to four times as long (`R$ 1.234.567,89` is five times as long in words); a longer one is `ErrTextTooLong`.
+- An application that already makes a spoken text itself (as Corujão.ai does): pass it with `Speech.Raw: true` to speak it as it is, or delete the code and use `Normalizer` with `Speech.Lexicon` holding the domain's words, `MaxWords` and `RestNote`. `Speakable` of a spoken text is that text, so a text that has been through both is not changed twice.
+- Store `Normalizer.Version()` beside the spoken text you keep, so a voice note can be audited against the rules that made it.
+- To make a model write text that is easy to hear, put the guideline of `docs/speech-ptbr.md`, section 4, in its system prompt.
+
 ## 0.4.0
 
 Nothing to change: the API of 0.3.2 is intact and a client that does not set `Config.Kokoro` is the client it was. The keys of Piper audio are the ones 0.3.2 made.

@@ -10,6 +10,19 @@ a release is corrected by another release and never by moving a tag.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-26
+
+### Added
+
+- **A Brazilian Portuguese verbalizer**, standard library only, deterministic and applied by default before synthesis by both engines: `Speakable(text)`, `Normalizer` (`NewNormalizer(Speech)`, `Normalizer.Speakable(text, now)`, `Normalizer.Version()`), `Speech`, `LexiconEntry`, `BaseLexicon()`, `NormalizerVersion`. It says cardinals and ordinals with gender and number agreement, decimals ("vírgula"), thousands separators, negatives, money (`R$ 24,90`, `US$`, `€`), times (`06:30`, `7h30`, paces and durations), dates (in full, or relative to a moment: "hoje", "amanhã", "dia vinte"), percent, ranges (`8-12`), fitness notation (`3x10`, `4x`), units (kg, g, km, m, cm, mm, kcal as "calorias", ml, l, km/h, bpm, min, h, s, kg/m², °C...), documents and telephones digit by digit, e-mails and links, abbreviations, symbols and acronyms; turns list items into sentences and parentheses into commas; drops formatting and emoji; collapses repeated marks; gives a long sentence a breath; and can cut a long text at a sentence. The research, the rules, the choices and a guideline for the system prompt of a model whose answer will be spoken are in `docs/speech-ptbr.md`.
+- `Config.Speech` (`Speech`: `Raw`, `Lexicon`, `MaxWords`, `RestNote`, `SkipLinePrefixes`, `KeepCapitals`). The application's lexicon is applied before the base one and wins; it touches only the spoken text.
+- `Client.Speakable(text)`, `Client.Normalizer()` and `Client.NormalizerVersion()`: the text a call would say, the normalizer, and the version of its rules, to store beside the text a voice note was made from.
+- `NumberInWords`, `NumberInWordsFeminine`, `OrdinalInWords`, `MoneyInWords` and `SayDay`, the pieces of the verbalizer a caller may want on their own.
+
+### Changed
+
+- `Speak`, `SpeakAs` and `Key` of a `*Client` make the text speakable before they speak or hash it, unless `Config.Speech.Raw` is set. The audio of any text with numbers, symbols, formatting, emoji or no final punctuation changes, and so does its key (the key hashes what is said). The limit `MaxChars` is checked on the text as given, before the rules run, and the spoken text may be up to four times as long. `Plain` is unchanged. See `UPGRADE.md`.
+
 ## [0.4.0] - 2026-11-26
 
 ### Added

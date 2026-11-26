@@ -30,6 +30,9 @@ an application otherwise writes every time:
 - errors that carry the exit status and a short summary, never what was said;
 - `Plain`, which removes the formatting of WhatsApp and Markdown and the emojis
   from a message, so a voice does not read "asterisk" aloud;
+- `Speakable`, the Brazilian Portuguese verbalizer every voice speaks through by
+  default: numbers, money, dates, times, units, acronyms and symbols in words,
+  list items as sentences, a pronunciation lexicon you extend (see "Speech");
 - several voices in one client, named by a type (`piper.VoiceFaber`,
   `piper.VoiceCadu`, and the Kokoro ones `piper.VoiceDora`, `piper.VoiceAlex`,
   `piper.VoiceSanta`), with a default one and a choice per call;
@@ -313,8 +316,9 @@ case err != nil:                             // context cancelled, disk
 // audio.Duration the length of the speech, which is what a voice note's header needs.
 ```
 
-`Plain` is not applied by `Speak`: the application decides what is spoken. It
-removes `*bold*`, `_italic_`, `~strikethrough~`, `` `code` `` and the `**double**`
+`Speak` makes the text speakable itself (see "Speech" below), so `Plain` is
+only needed when the application wants the formatting removed and nothing else.
+It removes `*bold*`, `_italic_`, `~strikethrough~`, `` `code` `` and the `**double**`
 forms, the markers of headings, quotes, bullets and numbered items, web
 addresses, emojis and arrows, keeps the words of a `[link](address)`, and makes
 every line a sentence, so list items are separated by a pause. It does not spell
@@ -332,6 +336,59 @@ run on the server.
 
 Do not log the text, the audio or a `ProcessError`'s fields beyond what you need:
 they can carry personal data. The package itself never logs.
+
+## Speech: what is said is not what is written
+
+A voice reads the spelling through espeak-ng, and neither engine takes SSML or
+documents any text normalization: digits are read as they can be, with no
+agreement ("dois séries"), no units, no money, no times and no dates, and
+"3x10", "R$ 228,00" or "50 min" come out wrong. So `Speak` and `SpeakAs` first
+run the text through `Speakable`, a deterministic verbalizer for Brazilian
+Portuguese written with the standard library only: cardinals and ordinals with
+agreement ("duas séries", "um quilo"), decimals, money, times, dates, percent,
+ranges, fitness notation (`3x10`), units, documents, acronyms, abbreviations,
+symbols, and the punctuation the engines turn into pauses. The rules, the sources
+they come from and the measured effect are in
+[docs/speech-ptbr.md](docs/speech-ptbr.md): with the raw text the words heard were
+65% to 75% right on six real sentences, and 93% to 94% after it.
+
+```go
+piper.Speakable("Próximo treino: supino 3x10 com 42,5kg às 06:30.")
+// "Próximo treino: supino três séries de dez com quarenta e dois vírgula cinco quilos às seis e meia."
+piper.Speakable("Plano anual R$ 228,00 (R$ 19,00/mês).")
+// "Plano anual duzentos e vinte e oito reais, dezenove reais por mês."
+```
+
+It is on by default for every voice of the package, all of which speak Brazilian
+Portuguese; Kokoro is always called with `pt-br`, never the European `pt`. Set
+`Config.Speech` to adapt it, or `Config.Speech.Raw` to speak the text as given
+because the application has already made the spoken text:
+
+```go
+n := piper.NewNormalizer(piper.Speech{
+    Lexicon:          []piper.LexiconEntry{{Written: "supino", Said: "supíno", AnyCase: true}}, // your domain
+    MaxWords:         75,                                      // cut a long answer at a sentence...
+    RestNote:         "O resto eu deixei por escrito.",        // ...and say so
+    SkipLinePrefixes: []string{"fonte:"},
+})
+spoken := n.Speakable(reply, time.Now()) // dates as people say them: "hoje", "amanhã", "dia vinte"
+store(reply, spoken, n.Version())        // the original, what was said, and by which rules
+```
+
+- The base lexicon (`BaseLexicon()`) holds the acronyms and borrowed words that
+  are said the same in every product (CPF, CNPJ, IRPF, INSS, FGTS, MEI, PIX, IMC,
+  RPE, RIR, WhatsApp...); the application's `Speech.Lexicon` is applied first and
+  wins. The lexicon touches the spoken text only, never the chat text.
+- `NormalizerVersion` (and `Normalizer.Version()`, which adds a hash of the
+  lexicon and options when there are any) names the rules. Store it with the
+  spoken text; for a `Remote` put it in `RemoteConfig.KeyTag`.
+- `Key` hashes the spoken text, so it changes exactly when what is said changes.
+- `Client.Speakable(text)` is the text a call would say; `Client.Normalizer()` is
+  the normalizer, to count dates from a moment of your own.
+- `MaxChars` counts the text as given; the spoken text may be up to four times as
+  long.
+- To make an assistant write text that is easy to hear, paste the guideline of
+  section 4 of `docs/speech-ptbr.md` into its system prompt.
 
 ## Reuse audio
 

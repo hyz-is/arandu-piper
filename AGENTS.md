@@ -36,6 +36,10 @@ not list it.
 | `handler.go` | `Handler`: `POST` text and voice, the audio back, `GET` the voices the node serves (`VoiceLister`), bearer tokens per client, body and concurrency limits, the wire error codes |
 | `remote.go` | `Remote`, `ParseNodes`, `Health`, `Voices`: a `Speaker` and `Keyed` over several nodes with failover, a cooldown and routing of a voice to the nodes that serve it |
 | `plain.go` | `Plain`, which strips WhatsApp and Markdown formatting and emojis before the text is spoken |
+| `speech.go` | `Speech`, `Normalizer`, `Speakable` and `NormalizerVersion`: the Brazilian Portuguese verbalizer every voice speaks through by default (dates, times, money, ranges, fitness notation, symbols, prosody), line by line in the order of the rules |
+| `speech_numbers.go` | `NumberInWords`, `NumberInWordsFeminine`, `OrdinalInWords`, `MoneyInWords` and the currencies |
+| `speech_lexicon.go` | `LexiconEntry`, `BaseLexicon`, the units of measure and the feminine nouns |
+| `docs/speech-ptbr.md` | the study behind the verbalizer, with its sources, the rules and choices, the measured accuracy, and the guideline an application pastes into the system prompt of a model whose answer will be spoken |
 | `fake.go` | `Fake`, the scripted `Speaker` for an application's tests |
 | `docs/sitecustomize.py` | the shim that limits onnxruntime's threads and turns its telemetry off, for the image of an application |
 | `docs/Dockerfile.snippet` | the build and runtime stages that put Piper and a voice in an application's image; it was built and run, keep it that way when a digest or version changes |
@@ -49,6 +53,9 @@ not list it.
 | `tests/Unit/voice_test.go` | several voices in one client, `ParseVoice`, `VoicesIn` and what changes the key |
 | `tests/Unit/cache_test.go` | the reuse, a failing store, identical calls at the same time |
 | `tests/Unit/plain_test.go` | `Plain` |
+| `tests/Unit/speech_test.go` | every rule of the verbalizer, table by table, with real fitness and finance sentences, and that `Speakable` of a spoken text is itself |
+| `tests/Unit/speech_domain_test.go` | the finance lexicon and the cases of Corujão.ai's own tests, through the module |
+| `tests/Unit/speech_client_test.go` | the client: both engines get the speakable text, `pt-br`, `Raw`, the key, the limit |
 | `tests/Unit/manifest_test.go` | `arandu.mod.toml` held against the imports |
 
 ## Rules
@@ -96,6 +103,14 @@ not list it.
   standalone binary fails on them with "Phonemes must be one codepoint". The
   voices it does run are derived from the Lessac corpus, whose license excludes
   commercial use. Say so wherever a voice is recommended.
+- **What a voice says is decided by `Speakable`, in code.** A number, a date or an
+  amount of money is never left to the model that wrote the answer, nor to
+  espeak-ng. A change to a rule that changes what a text is turned into raises
+  `NormalizerVersion`, gets a row in the table of `tests/Unit/speech_test.go` and
+  a line in `docs/speech-ptbr.md`; every voice of this package speaks Brazilian
+  Portuguese, and Kokoro is called with `pt-br`, never `pt`. The verbalizer reads
+  no clock (a date is relative only when the caller passes `now`) and imports
+  nothing but the standard library.
 - **No framework import and no third-party dependency.** `go.mod` has no
   `require`. If one is ever needed, the `framework` floor in `arandu.mod.toml`
   moves with it and every installer is told in `UPGRADE.md`.

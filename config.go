@@ -109,6 +109,13 @@ type Config struct {
 	// working directory, removed when the call returns. Empty means the
 	// system's temporary directory.
 	TempDir string
+	// Speech configures the verbalizer that turns the text into what the voice
+	// says (numbers, money, dates, times, units and symbols in words, the
+	// lexicon spelled, formatting and emoji removed, sentences punctuated).
+	// It is on by default: every voice of this package speaks Brazilian
+	// Portuguese. Set Speech.Raw when the application makes the spoken text
+	// itself. See Normalizer and docs/speech-ptbr.md.
+	Speech Speech
 	// Env holds extra "KEY=VALUE" entries for the program, such as
 	// "PIPER_ORT_THREADS=2" for docs/sitecustomize.py, which limits the threads of
 	// onnxruntime. OMP_NUM_THREADS does not: the onnxruntime of the piper-tts
@@ -141,6 +148,7 @@ type Client struct {
 	maxChars    int
 	tempDir     string
 	env         []string
+	speech      *Normalizer
 }
 
 var _ Speaker = (*Client)(nil)
@@ -289,6 +297,7 @@ func New(cfg Config) (*Client, error) {
 		maxChars:    cfg.MaxChars,
 		tempDir:     tempDir,
 		env:         append([]string(nil), cfg.Env...),
+		speech:      NewNormalizer(cfg.Speech),
 	}
 	if c.opusBitrate == 0 {
 		c.opusBitrate = DefaultOpusBitrate
