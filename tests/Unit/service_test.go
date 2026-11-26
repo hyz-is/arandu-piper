@@ -356,16 +356,25 @@ func TestRemoteSkipsABusyNodeWithoutTakingItOut(t *testing.T) {
 	}
 }
 
-func TestRemoteDoesNotRetryARefusalAndChecksTheTextBeforeTheNetwork(t *testing.T) {
+func TestRemoteAsksEveryNodeForAVoiceAndChecksTheTextBeforeTheNetwork(t *testing.T) {
 	a, b := newNode(t, "a"), newNode(t, "b")
 	a.set("voice")
 	b.set("voice")
 	r := remote(t, func(c *piper.RemoteConfig) { c.MaxChars = 10 }, a, b)
+	// Nodes may serve different voices, so a refusal of a voice is asked of the
+	// next node; each node is asked once and the answer is remembered.
+	_, err := r.SpeakAs(context.Background(), "nope", "Anotado.")
+	if !errors.Is(err, piper.ErrUnknownVoice) || !strings.Contains(err.Error(), `"nope"`) || !strings.Contains(err.Error(), "n1") || !strings.Contains(err.Error(), "n2") {
+		t.Fatalf("%v", err)
+	}
+	if a.calls.Load()+b.calls.Load() != 2 {
+		t.Fatal("a refusal of a voice was not asked of the other node")
+	}
 	if _, err := r.SpeakAs(context.Background(), "nope", "Anotado."); !errors.Is(err, piper.ErrUnknownVoice) {
 		t.Fatalf("%v", err)
 	}
-	if a.calls.Load()+b.calls.Load() != 1 {
-		t.Fatal("a refusal was retried")
+	if a.calls.Load()+b.calls.Load() != 2 {
+		t.Fatal("a refused voice was asked again within VoiceTTL")
 	}
 	if _, err := r.Speak(context.Background(), " ... "); !errors.Is(err, piper.ErrEmptyText) {
 		t.Fatalf("%v", err)
@@ -373,7 +382,7 @@ func TestRemoteDoesNotRetryARefusalAndChecksTheTextBeforeTheNetwork(t *testing.T
 	if _, err := r.Speak(context.Background(), "uma frase bem longa demais"); !errors.Is(err, piper.ErrTextTooLong) {
 		t.Fatalf("%v", err)
 	}
-	if a.calls.Load()+b.calls.Load() != 1 {
+	if a.calls.Load()+b.calls.Load() != 2 {
 		t.Fatal("the network was used for a text that is refused")
 	}
 }

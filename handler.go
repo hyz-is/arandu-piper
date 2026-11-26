@@ -59,6 +59,26 @@ type wireRequest struct {
 	Voice string `json:"voice,omitempty"`
 }
 
+// VoiceLister is what a Speaker implements to say which voices it can speak
+// with: *Client does. Handler answers a GET with it, so a Remote knows which
+// node serves which voice.
+type VoiceLister interface {
+	// Voices lists the voices, in a stable order.
+	Voices() []Voice
+	// DefaultVoice is the voice used when a call names none.
+	DefaultVoice() Voice
+}
+
+var _ VoiceLister = (*Client)(nil)
+
+// wireVoices is the answer to a GET: the voices the node serves. Both fields
+// are left out when the node's Speaker cannot say (a Fake, a Cache), which a
+// Remote reads as "unknown", not as "none".
+type wireVoices struct {
+	Voices  []string `json:"voices,omitempty"`
+	Default string   `json:"default,omitempty"`
+}
+
 type wireError struct {
 	Code    string `json:"error"`
 	Message string `json:"message"`
@@ -92,9 +112,11 @@ type HandlerConfig struct {
 // Handler serves a Speaker over HTTP, for another application's Remote to call.
 // It answers POST with {"text": ..., "voice": ...} (the voice is optional) with
 // the audio as the body, on whatever path it is mounted, and the audio's length
-// in DurationHeader. It checks the token, limits the body and the concurrency,
-// and keeps nothing: the Speaker's private directory is the only place the
-// speech touches, and it is removed before the call returns.
+// in DurationHeader. A GET with a valid token on the same path answers
+// {"voices": [...], "default": "..."}: the voices the node serves, when its
+// Speaker is a VoiceLister. It checks the token, limits the body and the
+// concurrency, and keeps nothing: the Speaker's private directory is the only
+// place the speech touches, and it is removed before the call returns.
 type Handler struct {
 	speaker   Speaker
 	tokens    []namedToken
@@ -169,6 +191,14 @@ func (h *Handler) authenticate(r *http.Request) (string, bool) {
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	w.Header().Set("Cache-Control", "no-store")
+	if r.Method == http.MethodGet {
+		// The list of voices is for a caller with a token. Without one the
+		// answer is what it always was, so the path says nothing to a stranger.
+		if _, ok := h.authenticate(r); ok {
+			h.listVoices(w)
+			return
+		}
+	}
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", http.MethodPost)
 		h.fail(w, "", http.StatusMethodNotAllowed, codeMethod, "use POST", 0, start)
@@ -238,6 +268,18 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Length", strconv.Itoa(len(audio.Data)))
 	_, _ = w.Write(audio.Data)
 	h.record(client, http.StatusOK, "", chars, audio.Duration, start)
+}
+
+func (h *Handler) listVoices(w http.ResponseWriter) {
+	var out wireVoices
+	if l, ok := h.speaker.(VoiceLister); ok {
+		for _, v := range l.Voices() {
+			out.Voices = append(out.Voices, string(v))
+		}
+		out.Default = string(l.DefaultVoice())
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(out)
 }
 
 func classify(err error) (int, string) {
