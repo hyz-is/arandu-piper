@@ -1,8 +1,12 @@
-// Package piper turns text into speech by running Piper on the application's
-// own server: no text leaves the machine and there is no per-minute cost.
+// Package piper turns text into speech by running a voice engine on the
+// application's own server: no text leaves the machine and there is no
+// per-minute cost. The engines are Piper, and Kokoro-82M for the voices that
+// belong to it (VoiceDora, VoiceAlex, VoiceSanta): a voice belongs to one
+// engine, and the name in each call decides which one speaks.
 //
 // It is a thin layer over a program the application installs, Piper
-// (https://github.com/OHF-Voice/piper1-gpl), and optionally ffmpeg, which turns
+// (https://github.com/OHF-Voice/piper1-gpl) or Kokoro's kokoro-speak
+// (docs/kokoro-speak.py), and optionally ffmpeg, which turns
 // the WAV that Piper writes into the Ogg Opus of a WhatsApp voice note. Each
 // program is started with fixed arguments through os/exec, never through a
 // shell, inside a private temporary directory that is removed before the call
@@ -72,8 +76,9 @@ var (
 	// running program was killed. It also satisfies
 	// errors.Is(err, context.DeadlineExceeded).
 	ErrTimeout = errors.New("piper: speech synthesis timed out")
-	// ErrFailed means Piper could not run or exited with an error. The error
-	// is a *ProcessError carrying a short summary.
+	// ErrFailed means Piper (or kokoro-speak, for a Kokoro voice) could not run
+	// or exited with an error. The error is a *ProcessError carrying a short
+	// summary.
 	ErrFailed = errors.New("piper: piper failed")
 	// ErrBadOutput means Piper exited successfully but wrote no audio this
 	// package can read.
@@ -143,7 +148,15 @@ func (c *Client) SpeakAs(ctx context.Context, voice Voice, text string) (Audio, 
 	defer os.RemoveAll(dir)
 
 	wav := filepath.Join(dir, "speech.wav")
-	if err := c.synthesize(ctx, dir, v, spoken, text, wav); err != nil {
+	if v.engine == EngineKokoro {
+		if voice == "" {
+			voice = c.voice
+		}
+		err = c.synthesizeKokoro(ctx, dir, voice, spoken, text, wav)
+	} else {
+		err = c.synthesize(ctx, dir, v, spoken, text, wav)
+	}
+	if err != nil {
 		return Audio{}, err
 	}
 	duration, err := wavDuration(wav)
@@ -208,6 +221,14 @@ func (c *Client) Key(voice Voice, text string) (string, error) {
 		voice = c.voice
 	}
 	h := sha256.New()
+	if v.engine == EngineKokoro {
+		// Kokoro has no speaker number and no noise settings: only what reaches
+		// its command line changes the audio.
+		fmt.Fprintf(h, "arandu-piper/kokoro/1\x00%s\x00%s\x00%v\x00%d\x00%s\x00%d\x00",
+			voice, v.identity, c.lengthScale, c.silence, c.format, c.opusBitrate)
+		io.WriteString(h, spoken)
+		return hex.EncodeToString(h.Sum(nil)), nil
+	}
 	fmt.Fprintf(h, "arandu-piper/1\x00%s\x00%s\x00%d\x00%v\x00%d\x00%s\x00%d\x00",
 		voice, v.identity, v.speaker, c.lengthScale, c.silence, c.format, c.opusBitrate)
 	// The noise is hashed only when set, so a client that leaves it at the
@@ -245,13 +266,13 @@ func (c *Client) synthesize(ctx context.Context, dir string, v voiceModel, spoke
 	if c.silence > 0 {
 		args = append(args, "--sentence_silence", strconv.FormatFloat(c.silence.Seconds(), 'f', -1, 64))
 	}
-	return c.run(ctx, dir, c.binary, ErrFailed, strings.NewReader(spoken+"\n"), []string{spoken, original}, args...)
+	return c.run(ctx, dir, c.binary, ErrFailed, nil, strings.NewReader(spoken+"\n"), []string{spoken, original}, args...)
 }
 
 // convert writes a mono 16 kHz Ogg Opus file, the format of a WhatsApp voice
 // note. The voip application tuning favours the intelligibility of speech.
 func (c *Client) convert(ctx context.Context, dir, spoken, original, in, out string) error {
-	return c.run(ctx, dir, c.ffmpeg, ErrConvertFailed, nil, []string{spoken, original},
+	return c.run(ctx, dir, c.ffmpeg, ErrConvertFailed, nil, nil, []string{spoken, original},
 		"-hide_banner",
 		"-loglevel", "error",
 		"-nostdin",
@@ -269,11 +290,12 @@ func (c *Client) convert(ctx context.Context, dir, spoken, original, in, out str
 }
 
 // run starts one program without a shell and waits for it. Standard output is
-// discarded; standard error is kept only to summarize a failure.
-func (c *Client) run(ctx context.Context, dir, program string, kind error, stdin io.Reader, secrets []string, args ...string) error {
+// discarded; standard error is kept only to summarize a failure. extraEnv goes
+// after Config.Env.
+func (c *Client) run(ctx context.Context, dir, program string, kind error, extraEnv []string, stdin io.Reader, secrets []string, args ...string) error {
 	cmd := exec.CommandContext(ctx, program, args...)
 	cmd.Dir = dir
-	cmd.Env = c.environment(dir)
+	cmd.Env = append(c.environment(dir), extraEnv...)
 	cmd.Stdin = stdin
 	cmd.Stdout = io.Discard
 	cmd.WaitDelay = 2 * time.Second

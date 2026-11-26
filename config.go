@@ -52,14 +52,24 @@ const (
 type Config struct {
 	// BinaryPath is the Piper command-line program: the "piper" script that
 	// pip installs, or the standalone "piper" binary. An absolute path, a
-	// relative one, or a bare name looked up in PATH. Required.
+	// relative one, or a bare name looked up in PATH. Required, unless the
+	// client speaks with Kokoro only (Kokoro is set and neither BinaryPath nor
+	// Voices is).
 	BinaryPath string
-	// Voices are the voices the client can speak with, by name. At least one
-	// is required; every one is checked by New. VoicesIn builds the map when
-	// the files keep their catalogue names in one directory.
+	// Voices are the Piper voices the client can speak with, by name. At least
+	// one is required, unless the client speaks with Kokoro only; every one is
+	// checked by New. VoicesIn builds the map when the files keep their
+	// catalogue names in one directory. A Kokoro voice is not listed here: it
+	// belongs to Kokoro.
 	Voices map[Voice]VoiceFiles
-	// DefaultVoice is the voice Speak uses. It may be left empty when Voices
-	// holds a single voice, and must name one of Voices otherwise.
+	// Kokoro turns the Kokoro engine on, and with it the voices of
+	// KokoroVoices (VoiceDora, VoiceAlex, VoiceSanta). Zero leaves the client
+	// with Piper only. A client may hold Piper voices and Kokoro voices at
+	// once; the voice named in a call decides which engine speaks.
+	Kokoro KokoroConfig
+	// DefaultVoice is the voice Speak uses, of either engine. It may be left
+	// empty when the client holds a single voice, and must name one of its
+	// voices otherwise.
 	DefaultVoice Voice
 	// LengthScale is the pace: below 1 speaks faster and above 1 slower than
 	// the voice's own. Zero leaves the voice's own pace, which is 1. The
@@ -111,11 +121,13 @@ type Config struct {
 	Env []string
 }
 
-// Client runs Piper on the text it is given. It is safe for concurrent use;
-// every call works in its own directory. Speech synthesis is CPU bound, so the
+// Client runs Piper, or Kokoro for the voices that belong to it, on the text it
+// is given. It is safe for concurrent use; every call works in its own
+// directory. Speech synthesis is CPU bound, so the
 // application decides how many calls may run at once.
 type Client struct {
 	binary      string
+	kokoro      *kokoroEngine
 	voices      map[Voice]voiceModel
 	voice       Voice
 	lengthScale float64
@@ -136,29 +148,53 @@ var _ Speaker = (*Client)(nil)
 // New validates cfg and returns a client. It refuses a program or voice that
 // is missing or is not a regular file, a program that is not executable, no
 // voice at all, a default voice that is not configured, a voice configuration
-// that is not JSON, a speaker the voice does not have, an
-// unknown format, a number out of its range (pace, noise, pauses, bit rate), and a TempDir that is not a
-// directory. Nothing is started here: the programs are only looked at, not
-// run.
+// that is not JSON, a speaker the voice does not have, a Kokoro program, model
+// or voices file that is missing, a Kokoro voice that is not in the voices file,
+// an unknown format, a number out of its range (pace, noise, pauses, bit rate,
+// threads), and a TempDir that is not a directory. Nothing is started here: the
+// programs are only looked at, not run.
 func New(cfg Config) (*Client, error) {
-	binary, err := resolveProgram(cfg.BinaryPath)
-	if err != nil {
-		return nil, fmt.Errorf("piper: BinaryPath: %w", err)
-	}
+	// Piper is the engine unless the configuration asks for Kokoro alone: a
+	// client with Kokoro set and no Piper program or voice speaks with Kokoro
+	// only.
+	kokoroOn := cfg.Kokoro.enabled()
+	piperOn := !kokoroOn || cfg.BinaryPath != "" || len(cfg.Voices) > 0
 
-	if len(cfg.Voices) == 0 {
-		return nil, errors.New("piper: Voices: at least one voice is required")
-	}
-	voices := make(map[Voice]voiceModel, len(cfg.Voices))
-	for _, v := range sortedVoices(cfg.Voices) {
-		if strings.TrimSpace(string(v)) == "" {
-			return nil, errors.New("piper: Voices: a voice has an empty name")
+	var binary string
+	voices := map[Voice]voiceModel{}
+	if piperOn {
+		var err error
+		binary, err = resolveProgram(cfg.BinaryPath)
+		if err != nil {
+			return nil, fmt.Errorf("piper: BinaryPath: %w", err)
 		}
-		m, err := resolveVoice(v, cfg.Voices[v])
+		if len(cfg.Voices) == 0 {
+			return nil, errors.New("piper: Voices: at least one voice is required")
+		}
+		for _, v := range sortedVoices(cfg.Voices) {
+			if strings.TrimSpace(string(v)) == "" {
+				return nil, errors.New("piper: Voices: a voice has an empty name")
+			}
+			if v.Engine() == EngineKokoro {
+				return nil, fmt.Errorf("piper: Voices[%q]: a Kokoro voice is configured with Config.Kokoro, not Voices", v)
+			}
+			m, err := resolveVoice(v, cfg.Voices[v])
+			if err != nil {
+				return nil, err
+			}
+			voices[v] = m
+		}
+	}
+	var kokoro *kokoroEngine
+	if kokoroOn {
+		var err error
+		kokoro, err = resolveKokoro(cfg.Kokoro)
 		if err != nil {
 			return nil, err
 		}
-		voices[v] = m
+		for _, v := range kokoro.names {
+			voices[v] = voiceModel{engine: EngineKokoro, identity: kokoro.identity}
+		}
 	}
 	voice := cfg.DefaultVoice
 	if voice == "" {
@@ -191,6 +227,7 @@ func New(cfg Config) (*Client, error) {
 		format = FormatWAV
 	}
 	var ffmpeg string
+	var err error
 	switch format {
 	case FormatWAV:
 	case FormatOpus:
@@ -232,14 +269,13 @@ func New(cfg Config) (*Client, error) {
 		return nil, fmt.Errorf("piper: TempDir %q is not a directory", tempDir)
 	}
 
-	for _, entry := range cfg.Env {
-		if i := strings.IndexByte(entry, '='); i < 1 || strings.ContainsRune(entry, 0) {
-			return nil, fmt.Errorf("piper: Env entry %q is not KEY=VALUE", entry)
-		}
+	if err := checkEnv("Env", cfg.Env); err != nil {
+		return nil, err
 	}
 
 	c := &Client{
 		binary:      binary,
+		kokoro:      kokoro,
 		voices:      voices,
 		voice:       voice,
 		lengthScale: cfg.LengthScale,
