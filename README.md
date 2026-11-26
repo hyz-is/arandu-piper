@@ -345,12 +345,17 @@ agreement ("dois séries"), no units, no money, no times and no dates, and
 "3x10", "R$ 228,00" or "50 min" come out wrong. So `Speak` and `SpeakAs` first
 run the text through `Speakable`, a deterministic verbalizer for Brazilian
 Portuguese written with the standard library only: cardinals and ordinals with
-agreement ("duas séries", "um quilo"), decimals, money, times, dates, percent,
-ranges, fitness notation (`3x10`), units, documents, acronyms, abbreviations,
-symbols, and the punctuation the engines turn into pauses. The rules, the sources
-they come from and the measured effect are in
-[docs/speech-ptbr.md](docs/speech-ptbr.md): with the raw text the words heard were
-65% to 75% right on six real sentences, and 93% to 94% after it.
+agreement ("duas séries", "um quilo"), decimals, money, times, dates, installments
+("parcela 3/12"), percent, ranges, fitness notation (`3x10`), units, documents,
+abbreviations, symbols, and the punctuation the engines turn into pauses. Since
+0.6.0 it also has a **phonetic layer**, because neither engine takes SSML: acronyms
+spelled with the names of the letters ("GPU" is "gê pê u") or said as a word
+("NASA"), domains and e-mails said out ("ajuda@ctrl.fit"), identifiers dictated one
+by one (plates, IP addresses, versions, protocols), service hours (`24/7`, `D+1`,
+`das 08h às 17h`) and foreign words written as a Brazilian says them ("whey",
+"check-in", "webhook"). The rules, the sources they come from and the measured
+effect are in [docs/speech-ptbr.md](docs/speech-ptbr.md): section 5 has the
+before-and-after of both engines, transcribed back with whisper.
 
 ```go
 piper.Speakable("Próximo treino: supino 3x10 com 42,5kg às 06:30.")
@@ -375,10 +380,14 @@ spoken := n.Speakable(reply, time.Now()) // dates as people say them: "hoje", "a
 store(reply, spoken, n.Version())        // the original, what was said, and by which rules
 ```
 
-- The base lexicon (`BaseLexicon()`) holds the acronyms and borrowed words that
-  are said the same in every product (CPF, CNPJ, IRPF, INSS, FGTS, MEI, PIX, IMC,
-  RPE, RIR, WhatsApp...); the application's `Speech.Lexicon` is applied first and
-  wins. The lexicon touches the spoken text only, never the chat text.
+- The base lexicon (`BaseLexicon()`) is the shared dictionary of the products,
+  `lexicon/ptbr.json`: the acronyms, brands and borrowed words that are said the
+  same in every product (CPF, CNPJ, IRPF, INSS, FGTS, MEI, PIX, IMC, RPE, RIR, HIIT,
+  ALPR.sh, WhatsApp, app, login, checkout, e-mail, link...). The application's
+  `Speech.Lexicon` is applied first and wins, inside domains and e-mails too. It
+  touches the spoken text only, never the chat text. `LexiconJSON()` gives the file
+  to a program that is not written in Go, `LexiconVersion()` its version and
+  `ParseLexicon(data)` reads a file of the same format for `Speech.Lexicon`.
 - `NormalizerVersion` (and `Normalizer.Version()`, which adds a hash of the
   lexicon and options when there are any) names the rules. Store it with the
   spoken text; for a `Remote` put it in `RemoteConfig.KeyTag`.
@@ -387,8 +396,13 @@ store(reply, spoken, n.Version())        // the original, what was said, and by 
   the normalizer, to count dates from a moment of your own.
 - `MaxChars` counts the text as given; the spoken text may be up to four times as
   long.
-- To make an assistant write text that is easy to hear, paste the guideline of
-  section 4 of `docs/speech-ptbr.md` into its system prompt.
+- `Normalizer.Check(text, now)` makes the speech text and **validates it against the
+  text**: it reports as `[]Issue` every number, date, hour, identifier, unit,
+  currency or address of the text that the speech lost or changed (an error) and
+  every reading that was a guess (a warning). `piper.HasErrors(issues)` is the test
+  to refuse the audio and send the text alone.
+- To make an assistant write text that is easy to hear, paste the 17-rule guideline
+  of section 4 of `docs/speech-ptbr.md` into its system prompt.
 
 ## Reuse audio
 

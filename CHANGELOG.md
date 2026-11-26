@@ -10,6 +10,34 @@ a release is corrected by another release and never by moving a tag.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-26
+
+### Added
+
+- **The phonetic layer of the verbalizer.** What a voice says is now also written the way a Brazilian says it, in the spelling, because neither engine takes SSML. Acronyms are spelled with the names of the letters ("GPU" is "gê pê u", "ALPR" "á éle pê érre", "IMC" "i ême cê") or said as a word ("NASA", "SaaS", "JSON", "PIX", "HIIT"), by the dictionary first and by the shape of the syllables when the dictionary does not know them (`ReadsAsWord`); a plural of a spelled acronym adds "s". Domains, e-mails and short paths are said out ("alpr.sh" is "á éle pê érre ponto ésse agá", "ajuda@ctrl.fit" "ajuda arroba cê tê érre éle ponto fít", "exemplo.io/login" "exemplo ponto i ôh barra lóguin"); an address that cannot be dictated stays "o link". Foreign words and brands are written as they are said ("whey", "crossfit", "check-in", "feedback", "framework", "webhook", "Wi-Fi", "WhatsApp"). Identifiers are dictated digit by digit and letter by letter: plates (`ABC1D23`), IPv4 addresses, versions (`V2.1`), protocols and codes after "protocolo", "código", "pedido", toll-free (`0800 123 4567`) and international telephones. `24/7` is "vinte e quatro horas por dia, sete dias por semana" (a date after "em", "dia", "até"), `D+1` is "dê mais um", and a range of hours is "das oito às dezessete horas". New units: `GB MB KB TB Gbps Mbps FPS Hz kHz MHz GHz V W kW kWh mAh`; bytes are said "guigabáite", "megabáite". New abbreviations and symbols: `Ltda.`, `S.A.`, `Cia.`, `Av.`, `Ex.`, `§`, `§§`, `#meta` (hashtag), a lone `#` (cerquilha). `US$` is "dólares americanos".
+- **A shared dictionary**, `lexicon/ptbr.json`, embedded in the module: the pronunciation of the acronyms, documents, products, brands and borrowed words every product says the same way. `LexiconJSON()` gives the file (for a program that is not written in Go), `LexiconVersion()` its version, `ParseLexicon(data)` reads a file of the same format (a string, or `{"said": "...", "case": "any" | "exact"}` per term, the longest term first) into the `[]LexiconEntry` that `Speech.Lexicon` takes. `BaseLexicon()` is now this file.
+- **`Validate` and `Normalizer.Check`**: the validator stage. `Validate(display, speech)` (and `Normalizer.Validate`) compares the text a person reads with the text a voice says and reports, as `[]Issue` (`Kind`, `Severity`, `Text`, `Detail`), every number, date, hour, identifier, unit, currency or address of the first that was lost or changed in the second (an error), and what can be read two ways or was guessed (a warning); `HasErrors` is the test a caller uses to refuse the audio. `Normalizer.Check(text, now)` makes the speech text and validates it in one step.
+- `LetterName`, `SpellAcronym` and `ReadsAsWord`: the names of the letters in Brazilian Portuguese, the spelling of a sequence of letters and digits, and the decision between spelling a token and saying it as a word.
+- Section 4 of `docs/speech-ptbr.md` is the 17-rule guideline for the system prompt of a model whose reply will be spoken, with the measurement of this release in section 5.
+
+### Fixed
+
+Five defects of 0.5.0, reported by the Corujão.ai session with examples, each with its own test in `tests/Unit/speech_defects_test.go`:
+
+1. **"dia" said twice before a date.** `"vence dia 20/12"` was spoken "vence dia dia vinte de dezembro" (also `dia 1/12`, `em dia`, `no dia 05/12/2026`): a date counted from `now` is said with its own "dia", and the one already written was said as well. The date no longer repeats it.
+2. **An installment was read as a date.** `"Parcela 3/12"` was "parcela três de dezembro". After "parcela", "prestação" or "mensalidade" (or before "parcelas"), with an optional "nº", and in a list ("parcelas 10/12 e 11/12"), `x/y` with `x <= y <= 48` is now "três de doze"; anything else is a date or a fraction as before. `Validate` takes it for two numbers and not for a date.
+3. **The lexicon of the application did not reach into addresses.** E-mails and domains were said before the lexicon ran and by terms in lower case, so `"ajuda@corujao.ai"` never spoke "corujão" for a lexicon that has "Corujão". The index of the lexicon now matches without accents and in any case, and it is asked for the domain, each of its names and each name of the part before the arroba (`login@...` is "lóguin"); the application's entries still come first.
+4. **A relative date said twice.** `"ontem, 26/11"` was "ontem, ontem" (also `hoje, 27/11`, `amanhã, 28/11`, `ontem 26/11`, `ontem (26/11)`): when the word that the date would become is already next to it, the date is dropped.
+5. **Words missing from the shared dictionary:** `app` ("áp"), `login` ("lóguin") and `checkout` ("tchék aut") were already in it; `e-mail` is now "imêil" and `link` "linque" (it was "i mêiu" and "línk", and "o link" for an address that cannot be said is "o linque").
+
+### Changed
+
+- `NormalizerVersion` is `"ptbr-2.lex1"`: the number of the rules and the version of the dictionary. `Normalizer.Version()` still adds a hash of the application's lexicon. The speech of a text with an acronym, a domain, an e-mail, an identifier, a range of hours, a unit of data or a foreign word changed, and so did the `Key` of its audio. See `UPGRADE.md`.
+- `BaseLexicon()` holds more terms and is ordered longest term first; a spelled acronym is said with the names of the letters ("cê pê éfe", "i ême cê", "érre pê êh") and not with the letters of an older spelling ("cê pê efe", "érre pê é"). Entries of an application's `Speech.Lexicon` still run first and win.
+- An e-mail's domain is said as a domain ("hyz ponto i ésse") and not letter by letter of its words.
+- An address is said when it is a short domain with at most two plain words of path; before, every address was "o link".
+- Measured with both engines and whisper.cpp `small` on 21 sentences (78 hard items): the word error of Kokoro `pf_dora` fell from 25.2% (0.5.0) to 11.4% and that of Piper `faber` from 22.5% to 16.8%; the table, and what is not solved, are in section 5 of `docs/speech-ptbr.md`. Among the findings, espeak-ng **spells out a lone accented vowel** ("í" is read "i agudo", "ê" "e circunflexo"), so the names of the letters i, u, e and o are written "i", "u", "êh" and "ôh"; a test holds that no output is one of those four letters on its own.
+
 ## [0.5.0] - 2026-11-26
 
 ### Added
